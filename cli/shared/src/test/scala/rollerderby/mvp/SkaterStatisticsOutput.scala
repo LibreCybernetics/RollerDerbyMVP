@@ -19,7 +19,7 @@ private[mvp] object SkaterStatisticsOutput:
             case period +: jam +: name +: "All roles" +: metrics =>
               skater = Vector(period, jam, team, name)
               Some(skater ++ Vector("All roles") ++ metrics)
-            case ("Pack" | "Jammer") +: _ if line.startsWith(" ") && skater.nonEmpty =>
+            case ("Pack" | "Jammer" | "Unattributed") +: _ if line.startsWith(" ") && skater.nonEmpty =>
               Some(skater ++ cells)
             case _ => None
         case _ => None

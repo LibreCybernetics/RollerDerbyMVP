@@ -35,11 +35,11 @@ class DirectoryInputSuite extends munit.FunSuite:
     val rows = SkaterStatisticsOutput.rows(stats.out)
     val (overall, byRole) = rows.partition(_.lift(2).contains("All roles"))
     def penaltiesIn(rows: Vector[Vector[String]]): Int =
-      rows.flatMap(_.lift(5)).map(_.stripSuffix(" (partial)").toInt).sum
-    val withoutRole = overall.flatMap(_.lift(12)).map(_.toInt).sum
+      rows.flatMap(_.lift(5)).map(_.takeWhile(_.isDigit).toInt).sum
+    val withoutRole = penaltiesIn(byRole.filter(_.lift(2).contains("Unattributed")))
     assertEquals(penaltiesIn(overall), 1000)
     assert(withoutRole > 0)
-    assertEquals(penaltiesIn(byRole) + withoutRole, 1000)
+    assertEquals(penaltiesIn(byRole), 1000)
 
     val duration = """(\d+)m(\d{2})(?:\.(\d{3}))?s""".r
     def millis(cell: String): Long = cell.stripSuffix(" (partial)") match
@@ -50,10 +50,16 @@ class DirectoryInputSuite extends munit.FunSuite:
     assertEquals(starts.size, 149)
     starts.zip(starts.drop(1) :+ rows.size).foreach { case (start, end) =>
       val group = rows.slice(start, end)
-      val total = group.headOption.flatMap(_.lift(4)).map(millis)
-      val unattributed = group.headOption.flatMap(_.lift(13)).map(millis)
-      val roleTime = group.drop(1).flatMap(_.lift(4)).map(millis).sum
-      assertEquals(total, unattributed.map(_ + roleTime), group.headOption.map(_.take(2)).toString)
+      val total = group.headOption.getOrElse(fail("Expected a skater total"))
+      val clue = total.take(2).mkString(" · ")
+      def cell(row: Vector[String], column: Int): String =
+        row.lift(column).getOrElse(fail(s"Missing column $column for $clue"))
+      val breakdown = group.drop(1)
+      assertEquals(millis(cell(total, 4)), breakdown.map(row => millis(cell(row, 4))).sum, clue)
+      assertEquals(penaltiesIn(group.take(1)), penaltiesIn(breakdown), clue)
+      def knownPoints(value: String): Int = value.stripSuffix(" (partial)").toInt
+      for column <- Vector(7, 8) do
+        assertEquals(knownPoints(cell(total, column)), breakdown.map(row => knownPoints(cell(row, column))).sum, clue)
     }
   }
 

@@ -61,15 +61,17 @@ class VideoReviewedAttributionSuite extends munit.FunSuite:
       assertEquals(raw.map(_.slice(4, 8)), Vector(
         Vector("All roles", "1", duration, penalties),
         Vector("Pack", "1", "0m00s (partial)", rawRolePenalties),
-        Vector("Jammer", "1", "0m00s (partial)", rawRolePenalties)
+        Vector("Jammer", "1", "0m00s (partial)", rawRolePenalties),
+        Vector("Unattributed", "—", duration, penalties)
       ), key.mkString(" "))
-      assertEquals(raw.headOption.map(_.takeRight(2)), Some(Vector(penalties, duration)))
-      assertEquals(timed.map(_.slice(4, 8)), Vector(
+      assertEquals(timed.take(3).map(_.slice(4, 8)), Vector(
         Vector("All roles", "1", duration, penalties),
         Vector("Pack", "1", packTime, packPenalties.toString),
         Vector("Jammer", "1", jammerTime, jammerPenalties.toString)
       ), key.mkString(" "))
-      assertEquals(timed.headOption.map(_.takeRight(2)), Some(Vector("0", "0m00s")))
+      timed.find(_.lift(4).contains("Unattributed")).foreach { row =>
+        assertEquals(row.slice(6, 8), Vector("0m00s", "0"), key.mkString(" "))
+      }
     }
 
     val cokoyo = reviewedRows.filter(_.startsWith(Vector("1", "12", malditos, "#8 Cokoyo")))
@@ -89,7 +91,7 @@ class VideoReviewedAttributionSuite extends munit.FunSuite:
     assertEquals(reviewedRows.filterNot(row => affected.contains(row.take(4))),
       baselineRows.filterNot(row => affected.contains(row.take(4))))
     def overallTotals(rows: Vector[Vector[String]]): Vector[Vector[String]] =
-      rows.filter(_.lift(4).contains("All roles")).map(_.take(14))
+      rows.filter(_.lift(4).contains("All roles"))
     assertEquals(overallTotals(reviewedRows), overallTotals(baselineRows))
   }
 
@@ -105,9 +107,9 @@ class VideoReviewedAttributionSuite extends munit.FunSuite:
     assertEquals(rows.map(_.slice(4, 8)), Vector(
       Vector("All roles", "1", "1m32.600s", "0"),
       Vector("Pack", "1", "1m08s (partial, box estimate)", "0"),
-      Vector("Jammer", "1", "0m00s (partial)", "0")
+      Vector("Jammer", "1", "0m00s (partial)", "0"),
+      Vector("Unattributed", "—", "0m24.600s", "0")
     ))
-    assertEquals(rows.headOption.flatMap(_.lastOption), Some("0m24.600s"))
 
     val other = SampleFixtures.path(
       "STATS-2026-11-13_RollerDerbySanLuisPotosTeamBastardo_vs_IndependienteMalditosPerros.json"
@@ -116,6 +118,8 @@ class VideoReviewedAttributionSuite extends munit.FunSuite:
     val verified = run(estimates ++ paths, reviewedSource(paths))
     assertEquals(verified.status, 0)
     val verifiedRows = verified.rows.filter(_.startsWith(prefix))
-    assertEquals(verifiedRows.flatMap(_.lift(6)), Vector("1m32.600s", "1m11s", "0m21.600s"))
-    assertEquals(verifiedRows.headOption.flatMap(_.lastOption), Some("0m00s"))
+    assertEquals(verifiedRows.take(3).flatMap(_.lift(6)), Vector("1m32.600s", "1m11s", "0m21.600s"))
+    verifiedRows.find(_.lift(4).contains("Unattributed")).foreach { row =>
+      assertEquals(row.lift(6), Some("0m00s"))
+    }
   }

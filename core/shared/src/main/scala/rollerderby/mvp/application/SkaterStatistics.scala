@@ -19,6 +19,9 @@ final case class PointTotal(known: Int = 0, partial: Boolean = false):
   private[application] def +(other: PointTotal): PointTotal =
     PointTotal(known + other.known, partial || other.partial)
 
+  private[application] def remaining(before: PointTotal, after: PointTotal): PointTotal =
+    copy(known = known - before.known - after.known)
+
 object PointTotal:
   private[application] def from(score: Option[Int]): PointTotal =
     PointTotal(score.getOrElse(0), score.isEmpty)
@@ -51,7 +54,9 @@ final case class SkaterStatisticsRow(
     roles: Map[SkaterJamRole, ParticipationTotals] = Map.empty,
     unattributedTimePartial: Boolean = false,
     penaltiesWithoutRole: Int = 0,
-    unassignedPenalties: Int = 0
+    unassignedPenalties: Int = 0,
+    unattributedPointsFor: PointTotal = PointTotal(),
+    unattributedPointsAgainst: PointTotal = PointTotal()
 ):
   def penalties: Int = overall.penalties
 
@@ -172,7 +177,9 @@ object SkaterStatistics:
           },
           unattributedTimePartial = first.unattributedTimePartial || next.unattributedTimePartial,
           penaltiesWithoutRole = first.penaltiesWithoutRole + next.penaltiesWithoutRole,
-          unassignedPenalties = first.unassignedPenalties + next.unassignedPenalties
+          unassignedPenalties = first.unassignedPenalties + next.unassignedPenalties,
+          unattributedPointsFor = first.unattributedPointsFor + next.unattributedPointsFor,
+          unattributedPointsAgainst = first.unattributedPointsAgainst + next.unattributedPointsAgainst
         )
       }
     }.toVector

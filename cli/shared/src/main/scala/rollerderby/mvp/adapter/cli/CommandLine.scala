@@ -172,8 +172,7 @@ final class CommandLine(
 
   private val columns = Vector(
     "Skater", "Role", "Jams", "Active jam time", "Penalties", "Penalties/min",
-    "Points for", "Points against", "For/min", "Against/min", "Unassigned penalties",
-    "Penalties without role", "Unattributed jam time"
+    "Points for", "Points against", "For/min", "Against/min"
   )
 
   private def sorted(rows: Vector[SkaterStatisticsRow]): Vector[SkaterStatisticsRow] =
@@ -204,17 +203,28 @@ final class CommandLine(
       row: SkaterStatisticsRow,
       showGameLocalIds: Boolean
   ): Vector[Vector[String]] =
-    val overall = prefix ++ Vector(skaterLabel(row.skater, showGameLocalIds), "All roles") ++ metrics(row.overall) ++ Vector(
-      row.unassignedPenalties.toString,
-      row.penaltiesWithoutRole.toString,
-      partial(duration(row.unattributedJamTime), row.unattributedTimePartial)
-    )
+    val overall = prefix ++ Vector(skaterLabel(row.skater, showGameLocalIds), "All roles") ++ metrics(row.overall)
     val indent = Vector.fill(prefix.size + 1)("")
     val roles = SkaterJamRole.values.toVector.map { role =>
       val totals = row.roles.getOrElse(role, ParticipationTotals())
-      indent ++ Vector(role.toString) ++ metrics(totals) ++ Vector("—", "—", "—")
+      indent ++ Vector(role.toString) ++ metrics(totals)
     }
-    overall +: roles
+    val time = row.unattributedJamTime
+    val forPoints = row.unattributedPointsFor
+    val againstPoints = row.unattributedPointsAgainst
+    val unattributed = Option.when(
+      !time.isZero || row.unattributedTimePartial || row.penaltiesWithoutRole > 0 ||
+        forPoints.known != 0 || forPoints.partial || againstPoints.known != 0 || againstPoints.partial
+    ) {
+      val penalties = row.penaltiesWithoutRole.toString
+      val penaltyCell =
+        if row.unassignedPenalties > 0 then s"$penalties (${row.unassignedPenalties} without jam)" else penalties
+      indent ++ Vector(
+        "Unattributed", "—", partial(duration(time), row.unattributedTimePartial), penaltyCell, "—",
+        points(forPoints), points(againstPoints), "—", "—"
+      )
+    }
+    (overall +: roles) ++ unattributed
 
   private def metrics(totals: ParticipationTotals): Vector[String] =
     val time = totals.activeJamTime

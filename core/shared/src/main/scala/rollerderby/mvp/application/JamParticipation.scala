@@ -129,7 +129,9 @@ private object JamParticipation:
             pointsAgainst = PointTotal(partial = true)
           )),
           unattributedTimePartial = overall.timePartial,
-          penaltiesWithoutRole = penalties.size
+          penaltiesWithoutRole = penalties.size,
+          unattributedPointsFor = overall.pointsFor,
+          unattributedPointsAgainst = overall.pointsAgainst
         )
       case Timeline.StarPass(before, after, elapsed, window) =>
         val penaltyOrder = penalties.map(penalty => penaltyAfterPass(penalty, duration, elapsed))
@@ -160,7 +162,9 @@ private object JamParticipation:
         SkaterStatisticsRow(
           skater, overall, Map(before -> first, after -> second),
           unattributedTimePartial = elapsed.isEmpty && overall.timePartial,
-          penaltiesWithoutRole = unknownPenalties
+          penaltiesWithoutRole = unknownPenalties,
+          unattributedPointsFor = overall.pointsFor.remaining(forBefore, forAfter),
+          unattributedPointsAgainst = overall.pointsAgainst.remaining(againstBefore, againstAfter)
         )
 
   def incompleteRoles(totals: ParticipationTotals): Map[SkaterJamRole, ParticipationTotals] =
