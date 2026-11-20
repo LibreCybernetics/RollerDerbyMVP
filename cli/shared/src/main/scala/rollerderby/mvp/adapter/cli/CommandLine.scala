@@ -1,20 +1,25 @@
 package rollerderby.mvp.adapter.cli
 
-import rollerderby.mvp.application.{ImportGames, SkaterStatistics, SkaterStatisticsRow, StatisticSkater, TournamentSkaterStatistics}
+import rollerderby.mvp.application.{
+  ImportError, ImportGames, ImportedGames, SkaterStatistics, SkaterStatisticsRow, StatisticSkater, TournamentSkaterStatistics
+}
 import rollerderby.mvp.domain.{Game, GameId, GameSideId, SkaterId, TeamId}
 
 final class CommandLine(
     importGames: ImportGames,
     printOut: String => Unit,
-    printError: String => Unit
+    printError: String => Unit,
+    expandInput: String => Either[ImportError, Vector[String]] = path => Right(Vector(path))
 ):
-  private val statisticsUsage = "roller-derby-mvp skater-stats [--by jam|game|tournament] <file>..."
-  private val penaltyUsage = "roller-derby-mvp penalty-stats <file>..."
+  private val statisticsUsage = "roller-derby-mvp skater-stats [--by jam|game|tournament] <file-or-directory>..."
+  private val penaltyUsage = "roller-derby-mvp penalty-stats <file-or-directory>..."
   private val usage = s"Usage: roller-derby-mvp inspect <file>...\n       $statisticsUsage\n       $penaltyUsage"
+  private val directoryHelp = "Directories contribute their immediate .json files in filename order."
   private val statisticsHelp = s"""Usage: $statisticsUsage
     |Report penalties and active jam time by team and skater. Default scope is game.
     |Active jam time is the sum of recorded jam durations when fielded, including penalty-box time.
-    |Tournament scope combines all games in the supplied files.""".stripMargin
+    |Tournament scope combines all games in the supplied files.
+    |$directoryHelp""".stripMargin
 
   def run(args: Vector[String]): Int = args match
     case Vector("--help" | "-h") =>
@@ -29,10 +34,11 @@ final class CommandLine(
     case Vector("penalty-stats", "--help" | "-h") =>
       printOut(s"""Usage: $penaltyUsage
         |Report penalties by game and skater, with totals across all supplied games.
-        |The unassigned count shows penalties included in the totals that lack a valid jam link.""".stripMargin)
+        |The unassigned count shows penalties included in the totals that lack a valid jam link.
+        |$directoryHelp""".stripMargin)
       0
     case "inspect" +: paths if paths.nonEmpty =>
-      reportGames(paths) { (path, game) =>
+      reportGames(importGames.inspect(paths)) { (path, game) =>
         printOut(summary(path, game))
         val rosterIssues = game.sides.flatMap(_.roster.left.toOption.toVector.flatten)
         (rosterIssues ++ game.referenceIssues).foreach(issue => printError(s"$path: $issue"))
@@ -54,7 +60,7 @@ final class CommandLine(
       case paths => ("game", paths)
     (scope, inputPaths(operands)) match
       case ("jam" | "game", Some(files)) =>
-        reportGames(files)((path, game) => printGameStatistics(path, game, scope == "jam"))
+        reportGames(importStatistics(files))((path, game) => printGameStatistics(path, game, scope == "jam"))
       case ("tournament", Some(files)) =>
         reportTournament(files) { statistics =>
           printOut("Tournament totals")
@@ -70,8 +76,14 @@ final class CommandLine(
     case files if files.nonEmpty && files.forall(path => !path.startsWith("-")) => Some(files)
     case _ => None
 
-  private def reportGames(paths: Vector[String])(report: (String, Game) => Unit): Int =
-    val results = importGames.inspect(paths)
+  private def importStatistics(paths: Vector[String]): Vector[Either[ImportError, ImportedGames]] =
+    paths.flatMap { path =>
+      expandInput(path) match
+        case Right(files) => importGames.inspect(files)
+        case Left(error)  => Vector(Left(error))
+    }
+
+  private def reportGames(results: Vector[Either[ImportError, ImportedGames]])(report: (String, Game) => Unit): Int =
     results.foreach {
       case Right(imported) => imported.games.foreach(game => report(imported.path, game))
       case Left(error)     => printError(s"${error.path}: ${error.detail}")
@@ -92,7 +104,7 @@ final class CommandLine(
     statistics.warnings.foreach(warning => printError(s"$path: game ${game.id.value}: $warning"))
 
   private def reportTournament(paths: Vector[String])(report: TournamentSkaterStatistics => Unit): Int =
-    val results = importGames.inspect(paths)
+    val results = importStatistics(paths)
     val errors = results.flatMap(_.left.toOption)
     if errors.nonEmpty then
       errors.foreach(error => printError(s"${error.path}: ${error.detail}"))

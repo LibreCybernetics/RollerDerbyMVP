@@ -1,6 +1,6 @@
 package rollerderby.mvp
 
-import rollerderby.mvp.adapter.cli.CommandLine
+import rollerderby.mvp.adapter.cli.{CommandLine, LocalInputPaths}
 import rollerderby.mvp.adapter.crg.CrgFileGameSource
 import rollerderby.mvp.application.ImportGamesService
 
@@ -13,7 +13,8 @@ object Main:
       new ImportGamesService(CrgFileGameSource()),
       println,
       message =>
-        val _ = js.Dynamic.global.console.error(message)
+        val _ = js.Dynamic.global.console.error(message),
+      LocalInputPaths.inputs.expand
     )
     NodeProcess.exitCode = command.run(NodeProcess.argv.toVector.drop(2))
 

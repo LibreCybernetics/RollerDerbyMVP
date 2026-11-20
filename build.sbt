@@ -70,6 +70,35 @@ lazy val sampleFixtureSettings = Seq(
   }.taskValue
 )
 
+lazy val directoryInputFixtureSettings = Seq(
+  Test / sourceGenerators += Def.task {
+    val managed = (Test / sourceManaged).value
+    val directory = managed / "directory-inputs"
+    val mixed = directory / "mixed"
+    val malformed = directory / "malformed"
+    IO.createDirectory(directory / "empty")
+    val files = Seq(
+      (mixed / "z.json") -> """{"state":{"ScoreBoard.Game(z).Team(1).Score":0,"ScoreBoard.Game(z).Team(2).Score":0}}""",
+      (mixed / "a.JSON") -> """{"state":{"ScoreBoard.Game(a).Team(1).Score":0,"ScoreBoard.Game(a).Team(2).Score":0}}""",
+      (mixed / "README.md") -> "Test directory with two immediate CRG exports.",
+      (mixed / "nested.json" / "ignored.json") -> "{",
+      (malformed / "bad.json") -> "{"
+    )
+    files.foreach { case (file, contents) =>
+      if (!file.exists || IO.read(file) != contents) IO.write(file, contents)
+    }
+    val location = directory.getAbsolutePath.replace("\\", "\\\\").replace("\"", "\\\"")
+    val contents = s"""package rollerderby.mvp
+                       |
+                       |private[mvp] object DirectoryFixtures:
+                       |  def path(relative: String): String = "$location/" + relative
+                       |""".stripMargin
+    val output = managed / "rollerderby" / "mvp" / "DirectoryFixtures.scala"
+    if (!output.exists || IO.read(output) != contents) IO.write(output, contents)
+    Def.uncached(Seq(output))
+  }.taskValue
+)
+
 lazy val root = project.in(file("."))
   .aggregate(coreJVM, coreJS, crgImportJVM, crgImportJS, cliJVM, cliJS)
   .settings(publish / skip := true)
@@ -115,6 +144,7 @@ lazy val cli = crossProject(JSPlatform, JVMPlatform)
   .dependsOn(core, crgImport)
   .settings(wartremoverSettings)
   .settings(sampleFixtureSettings)
+  .settings(directoryInputFixtureSettings)
   .jsSettings(scalaJSValidationSettings)
   .settings(
     name := "roller-derby-mvp",

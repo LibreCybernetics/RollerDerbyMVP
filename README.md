@@ -21,7 +21,7 @@ Pass multiple paths to inspect multiple exports. The command reports file and fi
 ```sh
 sbt 'cliJVM/run skater-stats path/to/game.json'
 sbt 'cliJVM/run skater-stats --by jam path/to/game.json'
-sbt 'cliJVM/run skater-stats --by tournament path/to/game1.json path/to/game2.json'
+sbt 'cliJVM/run skater-stats --by tournament fixtures/samples/'
 ```
 
 Game totals are the default. The Node CLI takes the same arguments. Jam rows identify the period and jam number and show skaters who were fielded or received a penalty. Game and tournament totals also include rostered skaters with zero activity. Warnings about invalid rosters or unresolved references go to stderr.
@@ -35,10 +35,12 @@ Tournament totals cover all games in the supplied files. Identical game records 
 ### Penalty report
 
 ```sh
-sbt 'cliJVM/run penalty-stats path/to/game1.json path/to/game2.json'
+sbt 'cliJVM/run penalty-stats fixtures/samples/'
 ```
 
 `penalty-stats` prints a grand total, each game's subtotal with its team and skater counts, and each team and skater's count across all supplied games. It includes rostered skaters with zero penalties and uses the same counting and deduplication rules as `skater-stats`. The unassigned count is included in the penalty total.
+
+Both statistics commands accept any mix of files and directories. A directory contributes its immediate regular files with a `.json` extension, regardless of case, in filename order. With `fixtures/samples/`, the report reads all 14 exports. A directory with no matching files produces an error. Jam and game reports still show successfully loaded inputs when another input fails. Tournament and penalty reports require every input to load successfully.
 
 ### Compiler and lint checks
 
