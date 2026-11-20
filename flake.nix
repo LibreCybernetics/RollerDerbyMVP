@@ -12,7 +12,7 @@
     ] (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        jdk = pkgs.jdk21;
+        jdk = pkgs.jdk25;
       in {
         default = pkgs.mkShell {
           packages = [ jdk (pkgs.sbt.override { jre = jdk; }) pkgs.nodejs_24 ];

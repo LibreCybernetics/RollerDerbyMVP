@@ -4,7 +4,7 @@ Roller Derby MVP is a Scala command-line project for analyzing tournament data e
 
 ## Development
 
-Enter the development shell with `nix develop`. The flake supplies JDK 21, the sbt launcher, and Node.js 24. `project/build.properties` pins sbt, and `build.sbt` pins Scala and the cross-platform libraries.
+Enter the development shell with `nix develop`. The flake supplies JDK 25, the sbt launcher, and Node.js 24. `project/build.properties` pins sbt, and `build.sbt` pins Scala and the cross-platform libraries.
 
 ```sh
 sbt testFull
