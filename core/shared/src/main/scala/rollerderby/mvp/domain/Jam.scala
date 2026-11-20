@@ -39,7 +39,11 @@ final case class ScoringTrip(
 
 final case class ScoringTripKey(jam: JamKey, side: Side, number: Int) derives CanEqual
 
-final case class Fielding(id: FieldingId, skater: Option[EntityReference[GameSkaterId]])
+final case class Fielding(
+    id: FieldingId,
+    skater: Option[EntityReference[GameSkaterId]],
+    notFielded: Boolean = false
+)
 
 final case class FieldingId(jam: JamKey, side: Side, position: FieldingPosition) derives CanEqual
 

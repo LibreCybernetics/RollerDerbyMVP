@@ -1,6 +1,6 @@
 # Roller Derby MVP
 
-Roller Derby MVP is a Scala command-line project for analyzing tournament data exported by [CRG ScoreBoard](https://github.com/rollerderby/scoreboard). The initial command, `inspect`, imports one or more JSON files and summarizes the games they contain. MVP categories, scoring and tie-breaks are future work.
+Roller Derby MVP is a Scala command-line project for analyzing tournament data exported by [CRG ScoreBoard](https://github.com/rollerderby/scoreboard). Use `inspect` to summarize one or more exports and `skater-stats` to report penalties and active jam time by team and skater. MVP categories, scoring and tie-breaks are future work.
 
 ## Development
 
@@ -15,6 +15,30 @@ sbt 'cliJS/fastLinkJS; show cliJS/Compile/fastLinkJS/scalaJSLinkerOutputDirector
 Use `sbt test` for incremental testing. To run the JavaScript CLI, use `node <output-directory>/main.js inspect path/to/game.json` with the linker output directory printed by sbt.
 
 Pass multiple paths to inspect multiple exports. The command reports file and field details for import errors and returns a nonzero exit status if an import fails.
+
+## Skater statistics
+
+```sh
+sbt 'cliJVM/run skater-stats path/to/game.json'
+sbt 'cliJVM/run skater-stats --by jam path/to/game.json'
+sbt 'cliJVM/run skater-stats --by tournament path/to/game1.json path/to/game2.json'
+```
+
+Game totals are the default. The Node CLI takes the same arguments. Jam rows identify the period and jam number and show skaters who were fielded or received a penalty. Game and tournament totals also include rostered skaters with zero activity. Warnings about invalid rosters or unresolved references go to stderr.
+
+Active jam time is the sum of the recorded durations of jams in which the skater was fielded. It includes penalty-box time during those jams. A skater appearing in multiple positions in one jam gets that jam's duration once. Durations are summed at the recorded precision and displayed in whole seconds, for example `23m50s`. A subtotal marked `(partial)` means at least one fielded jam had no usable recorded duration.
+
+Penalties are counted from numbered skater penalty records starting at 1 and assigned using the recorded jam link. Penalties without a usable link are included in game and tournament totals and shown in the `Unassigned penalties` column.
+
+Tournament totals cover all games in the supplied files. Identical game records count once. An import failure or conflicting records for a game prevent tournament totals from being printed. Prepared team and skater IDs link appearances across games. Game-local IDs are displayed with their source game and side and are flagged in a warning.
+
+### Penalty report
+
+```sh
+sbt 'cliJVM/run penalty-stats path/to/game1.json path/to/game2.json'
+```
+
+`penalty-stats` prints a grand total, each game's subtotal with its team and skater counts, and each team and skater's count across all supplied games. It includes rostered skaters with zero penalties and uses the same counting and deduplication rules as `skater-stats`. The unassigned count is included in the penalty total.
 
 ### Compiler and lint checks
 

@@ -14,10 +14,7 @@ object Tournament:
       games: Vector[Game],
       charters: Map[TeamId, CharterRoster] = Map.empty
   ): Either[Vector[String], Tournament] =
-    val uniqueGames = games.distinct
-    val conflicts = uniqueGames.groupBy(_.id).iterator.collect {
-      case (gameId, copies) if copies.size > 1 => s"conflicting records for game ${gameId.value}"
-    }.toVector.sorted
+    val (uniqueGames, conflicts) = deduplicateGames(games)
     val charterIssues = for
       game <- uniqueGames
       side <- game.sides
@@ -32,3 +29,10 @@ object Tournament:
         Team(side.teamId, side.name, charters.get(side.teamId))
       }.toSet
       Right(Tournament(id, name, teams, uniqueGames))
+
+  private[mvp] def deduplicateGames(games: Vector[Game]): (Vector[Game], Vector[String]) =
+    val uniqueGames = games.distinct
+    val conflicts = uniqueGames.groupBy(_.id).iterator.collect {
+      case (gameId, copies) if copies.size > 1 => s"conflicting records for game ${gameId.value}"
+    }.toVector.sorted
+    (uniqueGames, conflicts)

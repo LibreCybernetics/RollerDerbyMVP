@@ -41,7 +41,7 @@ object CrgDomainMapper:
     val periods = periodSources.map(period(_, references))
     val sides = sidesWithFields.map { source =>
       val fielded = periods.iterator.flatMap(_.jams).flatMap(_.teams).filter(_.side == source.id.side)
-        .flatMap(_.fieldings).flatMap(_.skater).toVector
+        .flatMap(_.fieldings).filterNot(_.notFielded).flatMap(_.skater).toVector
       gameSide(source, fielded, references)
     }
     val clocks = fields.children("Clock").map { case (name, clock) =>
@@ -191,7 +191,11 @@ object CrgDomainMapper:
 
   private def jamTeam(key: JamKey, side: Side, fields: Fields, references: References): JamTeam =
     val fieldings = fields.children("Fielding").map { case (position, fielding) =>
-      Fielding(FieldingId(key, side, fieldingPosition(position)), references.skater(side, fielding, "Skater"))
+      Fielding(
+        FieldingId(key, side, fieldingPosition(position)),
+        references.skater(side, fielding, "Skater"),
+        fielding.boolean("NotFielded").contains(true)
+      )
     }
     val trips = fields.numberedChildren("ScoringTrip").map { case (number, trip) =>
       ScoringTrip(
