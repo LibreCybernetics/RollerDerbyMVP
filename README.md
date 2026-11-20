@@ -4,14 +4,15 @@ Roller Derby MVP is a Scala command-line project for analyzing tournament data e
 
 ## Development
 
-Enter the development shell with `nix develop`. The flake pins the JDK, sbt and Node.js toolchain. The sbt build pins Scala and the cross-platform libraries.
+Enter the development shell with `nix develop`. The flake supplies JDK 21, the sbt launcher, and Node.js 24. `project/build.properties` pins sbt, and `build.sbt` pins Scala and the cross-platform libraries.
 
 ```sh
-sbt test
+sbt testFull
 sbt 'cliJVM/run inspect path/to/game.json'
-sbt cliJS/fastLinkJS
-node cli/js/target/scala-3.8.3/roller-derby-mvp-fastopt/main.js inspect path/to/game.json
+sbt 'cliJS/fastLinkJS; show cliJS/Compile/fastLinkJS/scalaJSLinkerOutputDirectory'
 ```
+
+Use `sbt test` for incremental testing. To run the JavaScript CLI, use `node <output-directory>/main.js inspect path/to/game.json` with the linker output directory printed by sbt.
 
 Pass multiple paths to inspect multiple exports. The command reports file and field details for import errors and returns a nonzero exit status if an import fails.
 

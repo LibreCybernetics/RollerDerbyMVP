@@ -1,12 +1,12 @@
 import org.scalajs.linker.interface.ModuleKind
 
-ThisBuild / scalaVersion := "3.8.3"
+scalaVersion := "3.8.3"
 
 lazy val sampleFixtureSettings = Seq(
   Test / sourceGenerators += Def.task {
     val directory = (LocalRootProject / baseDirectory).value / "fixtures" / "samples"
     require(directory.isDirectory, s"Sample fixture directory is missing: $directory")
-    val filenames = (directory * "*.json").get.filter(_.isFile).map(_.getName).sorted
+    val filenames = (directory * "*.json").get().filter(_.isFile).map(_.getName).sorted
 
     def quote(value: String): String = "\"" + value.flatMap {
       case '\\' => "\\\\"
@@ -25,7 +25,7 @@ lazy val sampleFixtureSettings = Seq(
                        |""".stripMargin
     val output = (Test / sourceManaged).value / "rollerderby" / "mvp" / "SampleFixtures.scala"
     if (!output.exists || IO.read(output) != contents) IO.write(output, contents)
-    Seq(output)
+    Def.uncached(Seq(output))
   }.taskValue
 )
 
@@ -45,8 +45,8 @@ lazy val crgImport = crossProject(JSPlatform, JVMPlatform)
   .settings(sampleFixtureSettings)
   .settings(
     libraryDependencies ++= Seq(
-      "com.lihaoyi" %%% "ujson" % "4.4.3",
-      "org.scalameta" %%% "munit" % "1.2.3" % Test
+      "com.lihaoyi" %% "ujson" % "4.4.3",
+      "org.scalameta" %% "munit" % "1.2.3" % Test
     ),
     publish / skip := true
   )
@@ -65,7 +65,7 @@ lazy val cli = crossProject(JSPlatform, JVMPlatform)
   .settings(
     name := "roller-derby-mvp",
     Compile / mainClass := Some("rollerderby.mvp.Main"),
-    libraryDependencies += "org.scalameta" %%% "munit" % "1.2.3" % Test,
+    libraryDependencies += "org.scalameta" %% "munit" % "1.2.3" % Test,
     publish / skip := true
   )
   .jvmSettings(
