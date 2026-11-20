@@ -1,6 +1,6 @@
 import org.scalajs.linker.interface.ModuleKind
 
-scalaVersion := "3.8.3"
+scalaVersion := "3.9.0"
 
 lazy val sampleFixtureSettings = Seq(
   Test / sourceGenerators += Def.task {
