@@ -114,7 +114,10 @@ lazy val core = crossProject(JSPlatform, JVMPlatform)
       "io.github.cquiroz" %% "scala-java-time-tzdb" % "2.7.0"
     )
   )
-  .settings(publish / skip := true)
+  .settings(
+    libraryDependencies += "org.scalameta" %% "munit" % "1.2.3" % Test,
+    publish / skip := true
+  )
 
 lazy val crgImport = crossProject(JSPlatform, JVMPlatform)
   .crossType(CrossType.Full)

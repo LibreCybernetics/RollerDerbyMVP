@@ -1,6 +1,7 @@
 package rollerderby.mvp.adapter.crg
 
 import rollerderby.mvp.SampleFixtures
+import rollerderby.mvp.domain.{EntityReference, FieldingPosition, ScoringTripKey, Side}
 
 class CrgReaderParitySuite extends munit.FunSuite:
   private val ujson = CrgFileGameSource()
@@ -108,6 +109,68 @@ class CrgReaderParitySuite extends munit.FunSuite:
       assertEquals(jams.map(_.wallTimeEnd), Vector(None))
       assertEquals(jams.map(_.duration.map(_.toMillis)), Vector(Some(0L)))
       assertEquals(jams.map(_.periodClockElapsedStart.map(_.value.toMillis)), Vector(Some(0L)))
+    }
+  }
+
+  test("both readers preserve team-local star-pass evidence, fieldings and verified penalty fields") {
+    val gameKey = "ScoreBoard.Game(g)"
+    val jamKey = s"$gameKey.Period(1).Jam(2)"
+    val home = s"$jamKey.TeamJam(1)"
+    val away = s"$jamKey.TeamJam(2)"
+    val skater = s"$gameKey.Team(1).Skater(a)"
+    val penaltyKey = s"$skater.Penalty(1)"
+    val tripId = s""""$home.ScoringTrip(2).Id":"shared-trip""""
+    val input = state(scores + s""",
+      "$jamKey.Id":"jam-2",
+      "$jamKey.StarPass":true,
+      "$home.StarPass":true,
+      "$home.StarPassTrip":"shared-trip",
+      "$home.AfterSPScore":7,
+      "$home.MVP.StarPassElapsedMillis":35000,
+      $tripId,
+      "$home.ScoringTrip(2).AfterSP":true,
+      "$home.Fielding(Blocker1).Skater":"a",
+      "$home.Fielding(Blocker1).NotFielded":true,
+      "$home.Fielding(Blocker2).NotFielded":false,
+      "$home.Fielding(Blocker3).NotFielded":false,
+      "$away.StarPass":false,
+      "$away.ScoringTrip(3).Id":"shared-trip",
+      "$away.ScoringTrip(3).AfterSP":false,
+      "$skater.Flags":"",
+      "$penaltyKey.Jam":"jam-2",
+      "$penaltyKey.Time":200000,
+      "$penaltyKey.MVP.OccurredAtElapsedMillis":25000,
+      "$penaltyKey.MVP.AfterStarPass":false""")
+
+    Seq(CrgJson.decode, JsoniterCrgJson.decode).foreach { decode =>
+      val games = decode(input).fold(error => fail(error), identity)
+      val jam = games.flatMap(_.jams).headOption.getOrElse(fail("expected jam 2"))
+      val passing = jam.teams.find(_.side == Side.One).getOrElse(fail("expected the passing team"))
+      val opposing = jam.teams.find(_.side == Side.Two).getOrElse(fail("expected the opposing team"))
+      assertEquals(jam.id.map(_.sourceId.value), Some("jam-2"))
+      assertEquals(jam.starPass, Some(true))
+      assertEquals(passing.starPass, Some(true))
+      assertEquals(opposing.starPass, Some(false))
+      assertEquals(passing.starPassTrip, Some(EntityReference.Resolved(ScoringTripKey(jam.key, Side.One, 2))))
+      assertEquals(opposing.starPassTrip, None)
+      assertEquals(passing.afterStarPassScore, Some(7))
+      assertEquals(passing.starPassElapsed.map(_.toMillis), Some(35000L))
+      assertEquals(passing.fieldings.map(fielding => fielding.id.position -> fielding.notFielded), Vector(
+        FieldingPosition.Blocker1 -> true, FieldingPosition.Blocker2 -> false, FieldingPosition.Blocker3 -> false
+      ))
+      assert(games.forall(_.referenceIssues.isEmpty))
+
+      val penalty = games.flatMap(_.sides).flatMap(_.penalties).headOption.getOrElse(fail("expected a penalty"))
+      assertEquals(penalty.jam.flatMap(_.resolved), Some(jam.key))
+      assertEquals(penalty.occurredAtJamTime.map(_.toMillis), Some(25000L))
+      assertEquals(penalty.enteredAt.map(_.toEpochMilli), Some(200000L))
+      assertEquals(penalty.afterStarPass, Some(false))
+
+      val opponentOnly = input.replace(tripId, s""""$home.ScoringTrip(2).Id":"own-trip"""").nn
+      val unresolved = decode(opponentOnly).fold(error => fail(error), identity)
+      val links = unresolved.flatMap(_.jams).flatMap(_.teams).flatMap(_.starPassTrip)
+      assertEquals(links, Vector(EntityReference.Unresolved("shared-trip")))
+      assertEquals(unresolved.flatMap(_.referenceIssues), Vector(s"state.$home.StarPassTrip: unresolved reference 'shared-trip'"))
     }
   }
 

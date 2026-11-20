@@ -83,6 +83,8 @@ class SkaterStatisticsSuite extends munit.FunSuite:
       Vector("Coyotes", "Puma", "1", "0m00s", "0"),
       Vector("Coyotes", "#17 Águila", "3", "0m40s (partial)", "2")
     ))
+    val overall = totals.table.filter(_.lift(2).contains("All roles"))
+    assertEquals(overall.flatMap(_.lift(6)), Vector("—", "—", "—"))
     assert(totals.errors.exists(_.contains("2 penalties could not be assigned to a jam")))
     assert(totals.errors.exists(_.contains("unresolved reference 'missing'")))
     assertEquals(run(source, "--by", "game", "game.json"), totals)
@@ -365,6 +367,90 @@ class SkaterStatisticsSuite extends munit.FunSuite:
       Right("star-pass\tg\t1\t1\t1\t35000\nstar-pass\tg\t1\t1\t1\t36000")
     )
     assertEquals(duplicate.errors, Vector("times.tsv: line 1: conflicting entries for the same event"))
+  }
+
+  test("penalty order markers require a pass by the skater's own team") {
+    val penalties = Vector(
+      "Team(1).Skater(p1).Penalty(2).Jam" -> "\"one\"",
+      "Team(2).Skater(p2).Penalty(2).Jam" -> "\"one\""
+    )
+    val source = new CrgJsonGameSource(_ => Right(gameJson("g", timingGameFields ++ penalties)))
+    val args = Vector("skater-stats", "--by", "jam", "--event-timings", "times.tsv", "game.json")
+    val verifiedPass = "star-pass\tg\t1\t1\t1\t35000"
+    val valid = runCommand(source, args, _ => Right(Vector(
+      verifiedPass,
+      "penalty\tg\t1\t1\t1\tp1\t1\t-\tbefore",
+      "penalty\tg\t1\t1\t1\tp1\t2\t-\tafter"
+    ).mkString("\n")))
+    assertEquals(valid.status, 0)
+    assertEquals(valid.errors, Vector.empty)
+    val pivot = valid.table.filter(row => row.lift(1).contains("1") && row.lift(3).contains("p1"))
+    assertEquals(pivot.flatMap(row => row.lift(4).zip(row.lift(7))),
+      Vector("All roles" -> "2", "Pack" -> "1", "Jammer" -> "1"))
+
+    Vector("before", "after").foreach { marker =>
+      val invalid = runCommand(source, args, _ =>
+        Right(s"$verifiedPass\npenalty\tg\t1\t1\t2\tp2\t2\t-\t$marker"))
+      assertEquals(invalid, Result(1, Vector.empty,
+        Vector("times.tsv: line 2: penalty order requires a confirmed pass by the skater's team")))
+    }
+  }
+
+  test("a timing file may repeat embedded penalty evidence and reports conflicts with either field") {
+    val embedded = Vector(
+      "Team(1).Skater(p1).Penalty(1).MVP.OccurredAtElapsedMillis" -> "40000",
+      "Team(1).Skater(p1).Penalty(1).MVP.AfterStarPass" -> "true"
+    )
+    val source = new CrgJsonGameSource(_ => Right(gameJson("g", timingGameFields ++ embedded)))
+    val args = Vector("skater-stats", "--event-timings", "times.tsv", "game.json")
+    val prefix = "penalty\tg\t1\t1\t1\tp1\t1\t"
+    val identical = runCommand(source, args, _ => Right(prefix + "40000\tafter"))
+    assertEquals(identical.status, 0)
+    assertEquals(identical.errors, Vector.empty)
+    val cases = Vector(
+      "41000\tafter" -> "penalty time conflicts with the embedded verified time",
+      "40000\tbefore" -> "penalty order conflicts with the embedded verified order"
+    )
+    cases.foreach { case (fields, error) =>
+      assertEquals(runCommand(source, args, _ => Right(prefix + fields)),
+        Result(1, Vector.empty, Vector(s"times.tsv: line 1: $error")))
+    }
+  }
+
+  test("penalty timing files accept jam endpoints and reject times beyond the jam") {
+    val source = new CrgJsonGameSource(_ => Right(gameJson("g", timingGameFields)))
+    val args = Vector("skater-stats", "--event-timings", "times.tsv", "game.json")
+    val prefix = "penalty\tg\t1\t1\t1\tp1\t1\t"
+    Vector("0", "90000").foreach { elapsed =>
+      val report = runCommand(source, args, _ => Right(prefix + elapsed + "\t-"))
+      assertEquals(report.status, 0)
+      assertEquals(report.errors, Vector.empty)
+    }
+    assertEquals(runCommand(source, args, _ => Right(prefix + "90001\t-")),
+      Result(1, Vector.empty, Vector("times.tsv: line 1: penalty occurrence time must be within its jam's recorded duration")))
+  }
+
+  test("partial role penalty and scoring totals display a dash for their per-minute rates") {
+    val fields = Vector(
+      "Period(1).Jam(1).TeamJam(1).MVP.StarPassElapsedMillis" -> "30000",
+      "Period(1).Jam(1).TeamJam(1).JamScore" -> "4",
+      "Period(1).Jam(1).TeamJam(1).AfterSPScore" -> "2",
+      "Period(1).Jam(1).TeamJam(2).JamScore" -> "9",
+      "Team(1).Skater(p1).Penalty(1).MVP.OccurredAtElapsedMillis" -> "30000"
+    )
+    val opposingTrips = for
+      (trip, start, end, score) <- Vector((1, 0, 20000, 2), (2, 20000, 40000, 3), (3, 40000, 90000, 4))
+      (field, value) <- Vector("JamClockStart" -> start, "JamClockEnd" -> end, "Score" -> score)
+    yield s"Period(1).Jam(1).TeamJam(2).ScoringTrip($trip).$field" -> value.toString
+    val source = new CrgJsonGameSource(_ => Right(gameJson("g", timingGameFields ++ fields ++ opposingTrips)))
+    val report = run(source, "--by", "jam", "game.json")
+    assertEquals(report.status, 0)
+    val pivot = report.table.filter(row => row.lift(1).contains("1") && row.lift(3).contains("p1"))
+    assertEquals(pivot.flatMap(row => row.lift(4).map(_ -> row.slice(7, 13))), Vector(
+      "All roles" -> Vector("1", "0.67", "4", "9", "2.67", "6.00"),
+      "Pack" -> Vector("0 (partial)", "—", "2", "2 (partial)", "4.00", "—"),
+      "Jammer" -> Vector("0 (partial)", "—", "2", "4 (partial)", "2.00", "—")
+    ))
   }
 
   test("conflicting team-specific pass evidence leaves only the affected team's switch uncertain") {
