@@ -27,7 +27,19 @@ sbt 'cliJVM/stryker'
 
 Stryker4s prints the report location at the end of each run. Mutation scores are informational.
 
-The JVM-only JMH project can be checked with `sbt 'benchmarks/Jmh/compile'`. When benchmarks are added under `benchmarks/src/main/scala`, use `sbt 'benchmarks/Jmh/run <pattern>'` to run selected benchmarks. Replace `<pattern>` with a benchmark name or regular expression.
+The JVM-only JMH project can be checked with `sbt 'benchmarks/Jmh/compile'`. Use `sbt 'benchmarks/Jmh/run <pattern>'` to run selected benchmarks under `benchmarks/src/main/scala`. Replace `<pattern>` with a benchmark name or regular expression.
+
+### CRG JSON reader comparison
+
+The CLI uses uJSON. `CrgFileGameSource.jsoniter()` selects the jsoniter-scala reader on JVM and Node. Both readers use the same UTF-8 file adapter and map the flat CRG keys into the same typed game model.
+
+```sh
+nix develop --command sbt testFull
+nix develop --command sbt 'benchmarks/Jmh/run -foe true -prof gc -rf json -rff target/crg-jmh.json .*CrgDecodeBenchmark.*'
+nix develop --command bash benchmarks/run-cli-comparison.sh
+```
+
+The CLI comparison uses GNU `time` for elapsed time and peak RSS. It writes raw samples, optimized Node bundles, and bundle sizes to `target/crg-cli-benchmarks/`. Both benchmark entry points use the same `inspect` command. JMH checks complete game equality during setup, preloads the input strings, and times decoding through domain construction. The selective uJSON control discards non-game branches, then uses the same field mapper.
 
 ## CRG exports and samples
 
