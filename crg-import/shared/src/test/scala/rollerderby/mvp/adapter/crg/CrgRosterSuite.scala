@@ -68,7 +68,7 @@ class CrgRosterSuite extends munit.FunSuite:
     assertEquals(tournament.id, "event")
     assertEquals(tournament.games.size, 14)
     assertEquals(tournament.teams.size, 11)
-    assert(tournament.teams.values.forall(_.charter.isEmpty))
+    assert(tournament.teams.forall(_.charter.isEmpty))
 
     val first = tournament.games.headOption.getOrElse(fail("expected a tournament game"))
     val firstSide = sideOne(first)
@@ -82,7 +82,7 @@ class CrgRosterSuite extends munit.FunSuite:
     val duplicate = Tournament.assemble("event", "November tournament", Vector(first, first), Map(firstSide.teamId -> charter))
       .fold(issues => fail(issues.mkString(", ")), identity)
     assertEquals(duplicate.games.size, 1)
-    assert(duplicate.teams.get(firstSide.teamId).exists(_.charter.contains(charter)))
+    assert(duplicate.teams.exists(team => team.id == firstSide.teamId && team.charter.contains(charter)))
     val conflicting = first.copy(name = Some("Another game name"))
     assert(Tournament.assemble("event", "November tournament", Vector(first, conflicting)).isLeft)
 

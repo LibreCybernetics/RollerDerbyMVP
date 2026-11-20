@@ -3,7 +3,7 @@ package rollerderby.mvp.domain
 final case class Tournament private (
     id: String,
     name: String,
-    teams: Map[TeamId, Team],
+    teams: Set[Team],
     games: Vector[Game]
 )
 
@@ -28,7 +28,7 @@ object Tournament:
     val issues = conflicts ++ charterIssues
     if issues.nonEmpty then Left(issues)
     else
-      val teams = uniqueGames.flatMap(_.sides).distinctBy(_.teamId).map { side =>
-        side.teamId -> Team(side.teamId, side.name, charters.get(side.teamId))
-      }.toMap
+      val teams = uniqueGames.flatMap(_.sides).distinctBy(_.teamId).iterator.map { side =>
+        Team(side.teamId, side.name, charters.get(side.teamId))
+      }.toSet
       Right(Tournament(id, name, teams, uniqueGames))
