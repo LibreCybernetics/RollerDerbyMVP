@@ -9,7 +9,8 @@ import scala.collection.mutable.ArrayBuffer
 class SkaterStatisticsSuite extends munit.FunSuite:
   private final case class Result(status: Int, lines: Vector[String], errors: Vector[String]):
     def table: Vector[Vector[String]] =
-      lines.drop(1).filterNot(_.startsWith("Star-pass timing:")).map(_.split(" {2,}").nn.toVector.map(_.nn))
+      if lines.exists(_.startsWith("Team · ")) then SkaterStatisticsOutput.rows(lines)
+      else lines.drop(1).map(_.split(" {2,}").nn.toVector.map(_.nn))
 
   private def overallRows(result: Result, byJam: Boolean = false): Vector[Vector[String]] =
     val prefix = if byJam then 4 else 2
@@ -128,8 +129,8 @@ class SkaterStatisticsSuite extends munit.FunSuite:
     assertEquals(overallRows(totals), Vector(
       Vector("Coyotes", "Puma [g1/One/local]", "0", "0m00s", "0"),
       Vector("Coyotes", "Puma [g2/One/local]", "0", "0m00s", "0"),
-      Vector("Coyotes", "Puma [g3/One/local]", "0", "0m00s", "0"),
       Vector("Coyotes", "Águila", "2", "0m03s", "0"),
+      Vector("Coyotes", "Puma [g3/One/local]", "0", "0m00s", "0"),
       Vector("Coyotes", "Águila", "1", "0m01.500s", "0")
     ))
     assertEquals(totals.errors.count(_.contains("game-local team or skater IDs")), 3)
@@ -302,6 +303,27 @@ class SkaterStatisticsSuite extends munit.FunSuite:
       "Team(2).Skater(p2).Penalty(1).Jam" -> "\"two\""
     )
 
+  test("the report prints each team and each numbered skater once, with three role rows per skater") {
+    val fields = timingGameFields.filterNot(_._1 == "Team(1).Skater(p1).Name") ++ Vector(
+      "Team(1).FullName" -> "\"Coyotes\"",
+      "Team(2).FullName" -> "\"Owls\"",
+      "Team(1).Skater(p1).Name" -> "\"Águila\"",
+      "Team(1).Skater(p1).RosterNumber" -> "\"17\""
+    )
+    val source = new CrgJsonGameSource(_ => Right(gameJson("g", fields)))
+    val report = run(source, "game.json")
+    assertEquals(report.status, 0)
+    assertEquals(report.lines.filter(_.startsWith("Team · ")), Vector("Team · Coyotes", "Team · Owls"))
+    assertEquals(report.lines.count(_.contains("#17 Águila")), 1)
+    assertEquals(report.lines.count(_.contains("Coyotes")), 1)
+    assertEquals(report.lines.count(_.contains("Owls")), 1)
+    val group = report.lines.dropWhile(line => !line.startsWith("#17 Águila")).take(3)
+    assertEquals(group.size, 3)
+    assert(group.drop(1).forall(_.startsWith(" ")))
+    val roles = report.table.filter(_.lift(1).contains("#17 Águila")).flatMap(_.lift(2))
+    assertEquals(roles, Vector("All roles", "Pack", "Jammer"))
+  }
+
   test("verified timing file splits each team's pass independently and preserves the other team's full jam") {
     val source = new CrgJsonGameSource(_ => Right(gameJson("g", timingGameFields)))
     val timing = Vector(
@@ -324,7 +346,7 @@ class SkaterStatisticsSuite extends munit.FunSuite:
     assertEquals(row("1", "p1", "Jammer"), Some(Vector("1", "0m55s", "1")))
     assertEquals(row("1", "p1", "All roles"), Some(Vector("1", "1m30s", "1")))
     assertEquals(row("1", "p2", "Pack"), Some(Vector("1", "1m30s", "0")))
-    assertEquals(row("1", "p2", "Jammer"), None)
+    assertEquals(row("1", "p2", "Jammer"), Some(Vector("0", "0m00s", "0")))
     assertEquals(row("1", "j2", "Jammer"), Some(Vector("1", "1m30s", "0")))
     assertEquals(row("2", "p1", "Pack"), Some(Vector("1", "0m20s", "0")))
     assertEquals(row("2", "p2", "Pack"), Some(Vector("1", "1m10s", "1")))
@@ -464,8 +486,9 @@ class SkaterStatisticsSuite extends munit.FunSuite:
     assertEquals(report.errors, Vector("game.json: game g: period 1, jam 1, side 1: team StarPass is false but team evidence records a pass"))
     val rows = report.table.filter(_.lift(1).contains("1"))
     val pivot = rows.filter(_.lift(3).contains("p1"))
-    assertEquals(pivot.flatMap(_.lift(4)), Vector("All roles"))
-    assertEquals(pivot.flatMap(_.lift(15)), Vector("1m30s"))
+    assertEquals(pivot.flatMap(_.lift(4)), Vector("All roles", "Pack", "Jammer"))
+    assertEquals(pivot.flatMap(_.lift(15)), Vector("1m30s", "—", "—"))
+    assertEquals(pivot.drop(1).flatMap(_.lift(6)), Vector("0m00s (partial)", "0m00s (partial)"))
     assert(rows.exists(row => row.lift(3).contains("p2") && row.lift(4).contains("Pack") &&
       row.lift(6).contains("1m30s")))
   }

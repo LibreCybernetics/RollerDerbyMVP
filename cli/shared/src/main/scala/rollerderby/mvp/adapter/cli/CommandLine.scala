@@ -79,7 +79,7 @@ final class CommandLine(
           case Right(results) if scope == "tournament" =>
             reportTournament(results) { statistics =>
               printOut("Tournament totals")
-              printTable(columns, sorted(statistics.totals).flatMap(row => cells(row, showGameLocalIds = true)))
+              printSkaterSections(sorted(statistics.totals).map(row => Vector.empty[String] -> row), showGameLocalIds = true)
               printCoverage(statistics.coverage, statistics.totals)
               statistics.roleWarnings.foreach(printError)
             }
@@ -121,12 +121,11 @@ final class CommandLine(
     printOut(s"$path: ${gameLabel(game.id, game.name)}")
     if byJam then
       val rows = statistics.jams.sortBy(jam => (jam.key.period.number, jam.key.number)).flatMap { jam =>
-        sorted(jam.rows).flatMap { row =>
-          cells(row).map(Vector(jam.key.period.number.toString, jam.key.number.toString) ++ _)
-        }
+        val position = Vector(jam.key.period.number.toString, jam.key.number.toString)
+        sorted(jam.rows).map(row => position -> row)
       }
-      printTable(Vector("Period", "Jam") ++ columns, rows)
-    else printTable(columns, sorted(statistics.totals).flatMap(row => cells(row)))
+      printSkaterSections(rows, leadingColumns = Vector("Period", "Jam"))
+    else printSkaterSections(sorted(statistics.totals).map(row => Vector.empty[String] -> row))
     printCoverage(statistics.coverage, statistics.totals)
     (statistics.warnings ++ statistics.roleWarnings).foreach(warning => printError(s"$path: game ${game.id.value}: $warning"))
 
@@ -174,12 +173,13 @@ final class CommandLine(
 
   private def printPenaltyTable(rows: Vector[SkaterStatisticsRow], showGameLocalIds: Boolean): Unit =
     val entries = sorted(rows).map { row =>
-      skaterCells(row.skater, showGameLocalIds) ++ Vector(row.penalties.toString, row.unassignedPenalties.toString)
+      Vector(teamLabel(row.skater, showGameLocalIds), skaterLabel(row.skater, showGameLocalIds),
+        row.penalties.toString, row.unassignedPenalties.toString)
     }
     printTable(Vector("Team", "Skater", "Penalties", "Unassigned penalties"), entries)
 
   private val columns = Vector(
-    "Team", "Skater", "Role", "Jams", "Active jam time", "Penalties", "Penalties/min",
+    "Skater", "Role", "Jams", "Active jam time", "Penalties", "Penalties/min",
     "Points for", "Points against", "For/min", "Against/min", "Unassigned penalties",
     "Penalties without role", "Unattributed jam time"
   )
@@ -190,21 +190,38 @@ final class CommandLine(
       (skater.teamName, skater.rosterNumber.getOrElse(""), skaterName(skater), skater.teamId.toString, skater.skaterId.toString)
     }
 
-  private def cells(
-      row: SkaterStatisticsRow,
+  private def printSkaterSections(
+      entries: Vector[(Vector[String], SkaterStatisticsRow)],
+      leadingColumns: Vector[String] = Vector.empty,
       showGameLocalIds: Boolean = false
+  ): Unit =
+    val byTeam = entries.groupBy(_._2.skater.teamId)
+    val teams = entries.map(_._2.skater).distinctBy(_.teamId).sortBy(skater => (skater.teamName, skater.teamId.toString))
+    teams.foreach { team =>
+      printOut("")
+      printOut(s"Team · ${singleLine(teamLabel(team, showGameLocalIds))}")
+      val rows = byTeam.getOrElse(team.teamId, Vector.empty).flatMap { case (prefix, row) =>
+        skaterRows(prefix, row, showGameLocalIds)
+      }
+      printTable(leadingColumns ++ columns, rows)
+    }
+    if teams.nonEmpty then printOut("")
+
+  private def skaterRows(
+      prefix: Vector[String],
+      row: SkaterStatisticsRow,
+      showGameLocalIds: Boolean
   ): Vector[Vector[String]] =
-    val skater = skaterCells(row.skater, showGameLocalIds)
-    val overall = skater ++ Vector("All roles") ++ metrics(row.overall) ++ Vector(
+    val overall = prefix ++ Vector(skaterLabel(row.skater, showGameLocalIds), "All roles") ++ metrics(row.overall) ++ Vector(
       row.unassignedPenalties.toString,
       row.penaltiesWithoutRole.toString,
       partial(duration(row.unattributedJamTime), row.unattributedTimePartial)
     )
-    val roles = SkaterJamRole.values.toVector.flatMap(role =>
-      row.roles.get(role).filter(_.jams > 0).map(totals =>
-        skater ++ Vector(role.toString) ++ metrics(totals) ++ Vector("—", "—", "—")
-      )
-    )
+    val indent = Vector.fill(prefix.size + 1)("")
+    val roles = SkaterJamRole.values.toVector.map { role =>
+      val totals = row.roles.getOrElse(role, ParticipationTotals())
+      indent ++ Vector(role.toString) ++ metrics(totals) ++ Vector("—", "—", "—")
+    }
     overall +: roles
 
   private def metrics(totals: ParticipationTotals): Vector[String] =
@@ -235,19 +252,15 @@ final class CommandLine(
   private def partial(value: String, incomplete: Boolean): String =
     if incomplete then s"$value (partial)" else value
 
-  private def skaterCells(skater: StatisticSkater, showGameLocalIds: Boolean): Vector[String] =
+  private def teamLabel(skater: StatisticSkater, showGameLocalIds: Boolean): String = skater.teamId match
+    case TeamId.GameLocal(side) if showGameLocalIds => s"${skater.teamName} [${gameSideLabel(side)}]"
+    case _ => skater.teamName
+
+  private def skaterLabel(skater: StatisticSkater, showGameLocalIds: Boolean): String =
     val label = skater.rosterNumber.filter(_.nonEmpty).map(number => s"#$number ").getOrElse("") + skaterName(skater)
-    val (team, player) =
-      if showGameLocalIds then
-        val team = skater.teamId match
-          case TeamId.GameLocal(side) => s"${skater.teamName} [${gameSideLabel(side)}]"
-          case TeamId.External(_)     => skater.teamName
-        val player = skater.skaterId match
-          case SkaterId.GameLocal(id) => s"$label [${gameSideLabel(id.side)}/${id.sourceId.value}]"
-          case SkaterId.External(_)   => label
-        (team, player)
-      else (skater.teamName, label)
-    Vector(team, player)
+    skater.skaterId match
+      case SkaterId.GameLocal(id) if showGameLocalIds => s"$label [${gameSideLabel(id.side)}/${id.sourceId.value}]"
+      case _ => label
 
   private def gameSideLabel(side: GameSideId): String = s"${side.gameId.value}/${side.side.toString}"
 
@@ -257,8 +270,10 @@ final class CommandLine(
       case SkaterId.GameLocal(id) => id.sourceId.value
     )
 
+  private def singleLine(value: String): String = value.replaceAll("[\\r\\n\\t]", " ").nn
+
   private def printTable(header: Vector[String], rows: Vector[Vector[String]]): Unit =
-    val lines = (header +: rows).map(_.map(_.replaceAll("[\\r\\n\\t]", " ").nn))
+    val lines = (header +: rows).map(_.map(singleLine))
     val widths = lines.transpose.dropRight(1).map(column => column.map(_.length).maxOption.getOrElse(0))
     lines.foreach { line =>
       val padded = line.zip(widths).map { case (cell, width) => cell.padTo(width, ' ') }
