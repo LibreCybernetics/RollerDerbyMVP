@@ -50,6 +50,9 @@ lazy val crgImport = crossProject(JSPlatform, JVMPlatform)
     ),
     publish / skip := true
   )
+  .jvmSettings(
+    strykerMutate := Seq("shared/src/main/scala/**/*.scala")
+  )
   .jsSettings(
     Test / scalaJSLinkerConfig ~= (_.withModuleKind(ModuleKind.CommonJSModule))
   )
@@ -66,6 +69,7 @@ lazy val cli = crossProject(JSPlatform, JVMPlatform)
     publish / skip := true
   )
   .jvmSettings(
+    strykerMutate := Seq("shared/src/main/scala/**/*.scala"),
     Compile / run / fork := true,
     Compile / run / baseDirectory := (LocalRootProject / baseDirectory).value
   )
@@ -80,3 +84,8 @@ lazy val crgImportJVM = crgImport.jvm
 lazy val crgImportJS = crgImport.js
 lazy val cliJVM = cli.jvm
 lazy val cliJS = cli.js
+
+lazy val benchmarks = project.in(file("benchmarks"))
+  .enablePlugins(JmhPlugin)
+  .dependsOn(crgImportJVM)
+  .settings(publish / skip := true)

@@ -15,6 +15,19 @@ node cli/js/target/scala-3.8.3/roller-derby-mvp-fastopt/main.js inspect path/to/
 
 Pass multiple paths to inspect multiple exports. The command reports file and field details for import errors and returns a nonzero exit status if an import fails.
 
+### Mutation testing and microbenchmarks
+
+Run Stryker4s on demand from the repository root. Each command mutates the selected module's shared production code and runs its existing JVM MUnit suites.
+
+```sh
+sbt 'crgImportJVM/stryker'
+sbt 'cliJVM/stryker'
+```
+
+Stryker4s prints the report location at the end of each run. Mutation scores are informational.
+
+The JVM-only JMH project can be checked with `sbt 'benchmarks/Jmh/compile'`. When benchmarks are added under `benchmarks/src/main/scala`, use `sbt 'benchmarks/Jmh/run <pattern>'` to run selected benchmarks. Replace `<pattern>` with a benchmark name or regular expression.
+
 ## CRG exports and samples
 
 Place sample exports in [fixtures/samples](fixtures/samples/). If known, include the CRG release and whether each file is a single-game export or a full scoreboard export.
