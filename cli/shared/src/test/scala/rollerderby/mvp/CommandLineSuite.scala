@@ -2,7 +2,7 @@ package rollerderby.mvp
 
 import scala.collection.mutable.ArrayBuffer
 import rollerderby.mvp.adapter.cli.CommandLine
-import rollerderby.mvp.adapter.crg.{CrgFileGameSource, CrgJsonGameSource}
+import rollerderby.mvp.adapter.crg.{CrgFileGameSource, CrgJson, CrgJsonGameSource, JsoniterCrgJson}
 import rollerderby.mvp.application.ImportGamesService
 
 class CommandLineSuite extends munit.FunSuite:
@@ -21,19 +21,21 @@ class CommandLineSuite extends munit.FunSuite:
     }
     """
 
-  test("CLI reports successful inputs and errors and returns a nonzero status for a mixed batch") {
-    val out = ArrayBuffer.empty[String]
-    val errors = ArrayBuffer.empty[String]
-    val source = new CrgJsonGameSource(path => if path == "game.json" then Right(fixture) else Right("{"))
-    val cli = new CommandLine(new ImportGamesService(source), line => { out += line; () }, line => { errors += line; () })
+  Seq("uJSON" -> CrgJson.decode, "jsoniter-scala" -> JsoniterCrgJson.decode).foreach { case (name, decode) =>
+    test(s"$name CLI reports successful inputs and errors and returns a nonzero status for a mixed batch") {
+      val out = ArrayBuffer.empty[String]
+      val errors = ArrayBuffer.empty[String]
+      val source = new CrgJsonGameSource(path => if path == "game.json" then Right(fixture) else Right("{"), decode)
+      val cli = new CommandLine(new ImportGamesService(source), line => { out += line; () }, line => { errors += line; () })
 
-    assertEquals(cli.run(Vector("inspect", "bad.json", "game.json")), 1)
-    assertEquals(out.toVector, Vector(
-      "game.json: Tournament game [g1] | League A - Coyotes 12 (1 rostered) vs Owls 5 (0 rostered) | 2 jams"
-    ))
-    assert(errors.head.startsWith("bad.json: invalid JSON:"))
-    assertEquals(cli.run(Vector("inspect")), 2)
-    assertEquals(cli.run(Vector("--help")), 0)
+      assertEquals(cli.run(Vector("inspect", "bad.json", "game.json")), 1)
+      assertEquals(out.toVector, Vector(
+        "game.json: Tournament game [g1] | League A - Coyotes 12 (1 rostered) vs Owls 5 (0 rostered) | 2 jams"
+      ))
+      assert(errors.head.startsWith("bad.json: invalid JSON:"))
+      assertEquals(cli.run(Vector("inspect")), 2)
+      assertEquals(cli.run(Vector("--help")), 0)
+    }
   }
 
   test("CLI reports a real sample summary alongside a missing file error") {

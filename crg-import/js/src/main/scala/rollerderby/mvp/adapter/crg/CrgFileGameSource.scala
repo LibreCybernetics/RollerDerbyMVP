@@ -7,13 +7,17 @@ import scala.util.Try
 import rollerderby.mvp.application.GameSource
 
 object CrgFileGameSource:
-  def apply(): GameSource =
+  def apply(): GameSource = apply(CrgJson.decode)
+
+  def jsoniter(): GameSource = apply(JsoniterCrgJson.decode)
+
+  private def apply(decode: CrgJsonGameSource.Decoder): GameSource =
     val utf8 = new NodeTextDecoder("utf-8", js.Dynamic.literal(fatal = true))
-    new CrgJsonGameSource(path =>
+    val readUtf8: String => Either[String, String] = path =>
       Try(utf8.decode(NodeFiles.readFileSync(path))).toEither.left.map { error =>
         s"cannot read file: ${error.getMessage}"
       }
-    )
+    new CrgJsonGameSource(readUtf8, decode)
 
 @js.native
 @JSImport("node:fs",JSImport.Namespace)

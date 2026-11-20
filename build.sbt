@@ -17,13 +17,17 @@ lazy val sampleFixtureSettings = Seq(
       case char => char.toString
     } + "\""
 
+    val managed = (Test / sourceManaged).value
+    val invalidUtf8 = managed / "invalid-utf8.json"
+    if (!invalidUtf8.exists) IO.write(invalidUtf8, Array(0xc3.toByte, 0x28.toByte))
     val contents = s"""package rollerderby.mvp
                        |
                        |private[mvp] object SampleFixtures:
                        |  val filenames: Vector[String] = Vector(${filenames.map(quote).mkString(", ")})
                        |  def path(filename: String): String = ${quote(directory.getAbsolutePath + "/")} + filename
+                       |  val invalidUtf8Path: String = ${quote(invalidUtf8.getAbsolutePath)}
                        |""".stripMargin
-    val output = (Test / sourceManaged).value / "rollerderby" / "mvp" / "SampleFixtures.scala"
+    val output = managed / "rollerderby" / "mvp" / "SampleFixtures.scala"
     if (!output.exists || IO.read(output) != contents) IO.write(output, contents)
     Def.uncached(Seq(output))
   }.taskValue
@@ -46,6 +50,7 @@ lazy val crgImport = crossProject(JSPlatform, JVMPlatform)
   .settings(
     libraryDependencies ++= Seq(
       "com.lihaoyi" %% "ujson" % "4.4.3",
+      "com.github.plokhotnyuk.jsoniter-scala" %% "jsoniter-scala-core" % "2.43.0",
       "org.scalameta" %% "munit" % "1.2.3" % Test
     ),
     publish / skip := true
