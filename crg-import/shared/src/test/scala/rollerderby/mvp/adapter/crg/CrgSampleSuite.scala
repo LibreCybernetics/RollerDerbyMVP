@@ -52,7 +52,7 @@ class CrgSampleSuite extends munit.FunSuite:
   private def loadGame(filename: String): Game =
     val games = source.load(SampleFixtures.path(filename)).fold(error => fail(s"$filename: $error"), identity)
     assertEquals(games.size, 1)
-    games.head
+    games.headOption.getOrElse(fail(s"expected a game in $filename"))
 
   test("every sample JSON file has an expected result") {
     assertEquals(SampleFixtures.filenames, expectedGames.map(_.filename).sorted)

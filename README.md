@@ -16,6 +16,16 @@ Use `sbt test` for incremental testing. To run the JavaScript CLI, use `node <ou
 
 Pass multiple paths to inspect multiple exports. The command reports file and field details for import errors and returns a nonzero exit status if an import fails.
 
+### Compiler and lint checks
+
+Application, test, and benchmark code compile with Scala 3 warnings treated as errors, explicit nulls for Scala and Java interop, and WartRemover checks for unsafe operations.
+
+```sh
+sbt 'scalafixAll --check; benchmarks/scalafixAll --check'
+```
+
+Scalafix checks import organization and redundant syntax. To apply a fix, run the task for one project at a time, for example `sbt 'crgImportJVM/scalafixAll'`. JVM and Scala.js projects share source files.
+
 ### Mutation testing and microbenchmarks
 
 Run Stryker4s on demand from the repository root. Each command mutates the selected module's shared production code and runs its existing JVM MUnit suites.

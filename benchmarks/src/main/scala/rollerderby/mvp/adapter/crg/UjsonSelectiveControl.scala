@@ -36,9 +36,11 @@ private[mvp] object UjsonSelectiveControl:
         private var selected: Visitor[?, Value] = discard
 
         def visitKey(index: Int): Visitor[?, ?] = Value
-        def visitKeyValue(value: Any): Unit =
-          key = value.asInstanceOf[Value].str
-          selected = select(key)
+        def visitKeyValue(value: Any): Unit = value match
+          case keyValue: Value =>
+            key = keyValue.str
+            selected = select(key)
+          case _ => throw new IllegalArgumentException("expected a uJSON object key")
         def subVisitor: Visitor[?, ?] = selected
         def visitValue(value: Value, index: Int): Unit =
           if selected ne discard then result(key) = value

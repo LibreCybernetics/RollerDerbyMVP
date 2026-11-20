@@ -26,8 +26,8 @@ object CrgJson:
           case _              => CrgGames.invalid("state: expected an object")
       }
     catch
-      case error: ujson.ParseException           => Left(s"invalid JSON: ${error.getMessage}")
-      case error: ujson.IncompleteParseException => Left(s"invalid JSON: ${error.getMessage}")
+      case error @ (_: ujson.ParseException | _: ujson.IncompleteParseException) =>
+        Left(s"invalid JSON: ${Option(error.getMessage).getOrElse("null")}")
 
   private given CrgGames.FieldReader[Value] with
     def isNull(value: Value): Boolean = value == Null

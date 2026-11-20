@@ -2,6 +2,7 @@ package rollerderby.mvp.adapter.crg
 
 import com.github.plokhotnyuk.jsoniter_scala.core.*
 import rollerderby.mvp.domain.Game
+
 import scala.collection.mutable
 
 object JsoniterCrgJson:
@@ -14,7 +15,7 @@ object JsoniterCrgJson:
           case Export.NotAnObject   => CrgGames.invalid("expected a JSON object")
       }
     catch
-      case error: JsonReaderException => Left(s"invalid JSON: ${error.getMessage}")
+      case error: JsonReaderException => Left(s"invalid JSON: ${Option(error.getMessage).getOrElse("null")}")
 
   private enum FieldValue:
     case NullValue, Other
@@ -51,19 +52,21 @@ object JsoniterCrgJson:
               readObjectBody(in) {
                 val key = in.readKeyAsString()
                 if key.startsWith("ScoreBoard.Game(") then fields(key) = readField(in, retain = true)
-                else readField(in, retain = false)
+                else
+                  val _ = readField(in, retain = false)
               }
               state = Export.State(fields)
             else
               in.rollbackToken()
-              readField(in, retain = false)
+              val _ = readField(in, retain = false)
               state = Export.NoState
-          else readField(in, retain = false)
+          else
+            val _ = readField(in, retain = false)
         }
         state
       else
         in.rollbackToken()
-        readField(in, retain = false)
+        val _ = readField(in, retain = false)
         default
 
     def encodeValue(value: Export, out: JsonWriter): Unit =
@@ -83,24 +86,25 @@ object JsoniterCrgJson:
     token match
       case '{' =>
         readObjectBody(in) {
-          in.readKeyAsCharBuf()
-          readField(in, retain = false)
+          val _ = in.readKeyAsCharBuf()
+          val _ = readField(in, retain = false)
         }
         FieldValue.Other
       case '[' =>
         if !in.isNextToken(']') then
           in.rollbackToken()
           while
-            readField(in, retain = false)
+            val _ = readField(in, retain = false)
             in.isNextToken(',')
           do ()
           if !in.isCurrentToken(']') then in.arrayEndOrCommaError()
         FieldValue.Other
       case '"' =>
         in.rollbackToken()
-        if retain then FieldValue.Text(in.readString(null))
+        // The token is a quote, so the default for JSON null is unreachable.
+        if retain then FieldValue.Text(in.readString(""))
         else
-          in.readStringAsCharBuf()
+          val _ = in.readStringAsCharBuf()
           FieldValue.Other
       case 't' | 'f' =>
         in.rollbackToken()

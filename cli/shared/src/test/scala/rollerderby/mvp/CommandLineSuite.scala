@@ -1,9 +1,10 @@
 package rollerderby.mvp
 
-import scala.collection.mutable.ArrayBuffer
 import rollerderby.mvp.adapter.cli.CommandLine
 import rollerderby.mvp.adapter.crg.{CrgFileGameSource, CrgJson, CrgJsonGameSource, JsoniterCrgJson}
 import rollerderby.mvp.application.ImportGamesService
+
+import scala.collection.mutable.ArrayBuffer
 
 class CommandLineSuite extends munit.FunSuite:
   private val fixture = """
@@ -32,7 +33,7 @@ class CommandLineSuite extends munit.FunSuite:
       assertEquals(out.toVector, Vector(
         "game.json: Tournament game [g1] | League A - Coyotes 12 (1 rostered) vs Owls 5 (0 rostered) | 2 jams"
       ))
-      assert(errors.head.startsWith("bad.json: invalid JSON:"))
+      assert(errors.headOption.exists(_.startsWith("bad.json: invalid JSON:")), errors.toVector)
       assertEquals(cli.run(Vector("inspect")), 2)
       assertEquals(cli.run(Vector("--help")), 0)
     }
@@ -56,5 +57,5 @@ class CommandLineSuite extends munit.FunSuite:
         "EMEXRD - Discordias 97 (20 rostered) vs Mexico City Roller Derby - Mexico City All Stars 91 (20 rostered) | 36 jams"
     ))
     assertEquals(errors.size, 1)
-    assert(errors.head.startsWith(s"$missing: cannot read file:"), errors.head)
+    assert(errors.headOption.exists(_.startsWith(s"$missing: cannot read file:")), errors.toVector)
   }

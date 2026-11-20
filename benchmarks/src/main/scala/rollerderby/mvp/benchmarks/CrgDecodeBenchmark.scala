@@ -1,10 +1,11 @@
 package rollerderby.mvp.benchmarks
 
-import java.nio.file.{Files, Path}
-import java.util.concurrent.TimeUnit
 import org.openjdk.jmh.annotations.*
 import rollerderby.mvp.adapter.crg.{CrgJson, JsoniterCrgJson, UjsonSelectiveControl}
 import rollerderby.mvp.domain.Game
+
+import java.nio.file.{Files, Path}
+import java.util.concurrent.TimeUnit
 import scala.jdk.CollectionConverters.*
 
 @State(Scope.Thread)
@@ -21,25 +22,32 @@ class CrgDecodeBenchmark:
 
   @Setup(Level.Trial)
   def setup(): Unit =
-    val fixtures = Files.list(Path.of("fixtures", "samples"))
+    val fixtures = Files.list(Path.of("fixtures", "samples")).nn
     val paths =
-      try fixtures.iterator.asScala.filter(_.getFileName.toString.endsWith(".json"))
+      try fixtures.iterator.nn.asScala.filter(_.getFileName.nn.toString.endsWith(".json"))
         .toVector.sortBy(path => (Files.size(path), path.toString))
       finally fixtures.close()
 
+    def readFixture(path: Path): String = Files.readString(path).nn
+
     def gameState(path: Path): ujson.Obj =
-      ujson.read(Files.readString(path))("state").objOpt
+      ujson.read(readFixture(path))("state").objOpt
         .map(fields => ujson.Obj.from(fields.iterator.filter(_._1.startsWith("ScoreBoard.Game("))))
-        .getOrElse(throw new IllegalArgumentException(s"missing state in $path"))
+        .getOrElse(throw new IllegalArgumentException(s"missing state in ${path.toString}"))
+
+    def missingFixtures(): Nothing =
+      throw new IllegalArgumentException("no JSON fixtures in fixtures/samples")
+
+    def smallestFixture: Path = paths.headOption.getOrElse(missingFixtures())
 
     input = workload match
-      case "small" => Files.readString(paths.head)
-      case "large" => Files.readString(paths.last)
+      case "small" => readFixture(smallestFixture)
+      case "large" => readFixture(paths.lastOption.getOrElse(missingFixtures()))
       case "multiGame" =>
         val fields = paths.take(3).flatMap(path => gameState(path).obj.iterator)
         ujson.write(ujson.Obj("state" -> ujson.Obj.from(fields)))
       case "mostlyIgnored" =>
-        val fields = gameState(paths.head)
+        val fields = gameState(smallestFixture)
         val ignored = ujson.Obj("name" -> ("ignored metadata " * 10), "values" -> ujson.Arr(1, true, ujson.Null))
         (0 until 20000).foreach(index => fields(s"Ignored.$index") = ignored)
         ujson.write(ujson.Obj("state" -> fields))

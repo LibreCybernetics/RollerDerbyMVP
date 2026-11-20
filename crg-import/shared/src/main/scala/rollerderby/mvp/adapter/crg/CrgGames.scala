@@ -19,7 +19,7 @@ private object CrgGames:
       if games.isEmpty then invalid("state: no ScoreBoard.Game(id) records found")
       Right(games.map { case (id, fields) => game(id, fields) })
     catch
-      case error: InvalidField => Left(error.getMessage)
+      case error: InvalidField => Left(error.message)
 
   private def game[A](id: String, fields: Fields[A]): Game =
     val teams = Map.from(fields.children("Team"))
@@ -71,7 +71,7 @@ private object CrgGames:
           val end = key.indexOf(')', prefix.length)
           if end <= prefix.length || end + 2 >= key.length || key.charAt(end + 1) != '.' then
             invalid(s"$path.$key: expected $name(id).field")
-          (key.substring(prefix.length, end), key.substring(end + 2) -> value)
+          (key.substring(prefix.length, end).nn, key.substring(end + 2).nn -> value)
       }.groupMap(_._1)(_._2).toVector.sortBy(_._1).map { case (id, fields) =>
         id -> Fields(s"$path.$name($id)", fields)
       }
@@ -100,6 +100,6 @@ private object CrgGames:
         read(value).getOrElse(invalid(s"$path.$key: expected $expected"))
       }
 
-  private final class InvalidField(message: String) extends RuntimeException(message)
+  private final class InvalidField(val message: String) extends RuntimeException(message)
 
   def invalid(message: String): Nothing = throw InvalidField(message)

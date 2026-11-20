@@ -35,17 +35,17 @@ class CrgJsonSuite extends munit.FunSuite:
     val Vector(game) = CrgJson.decode(fixture).fold(error => fail(error), identity): @unchecked
     assertEquals(game.id, "g1")
     assertEquals(game.officialScore, Some(true))
-    val team = game.teams.head
+    val team = game.teams.headOption.getOrElse(fail("expected a team"))
     assertEquals(team.name, "League A - Coyotes")
     assertEquals(team.preparedTeamId, Some("team-a"))
     assertEquals(team.score, 12)
-    val skater = team.skaters.head
+    val skater = team.skaters.headOption.getOrElse(fail("expected a skater"))
     assertEquals(skater.name, Some("Águila"))
     assertEquals(skater.rosterNumber, Some("01"))
     assertEquals(skater.preparedSkaterId, Some("skater-a"))
     assertEquals(skater.penaltyCount, Some(1))
     assertEquals(game.jams.map(jam => jam.period -> jam.number), Vector(1 -> 2, 1 -> 10))
-    val jamTeam = game.jams.head.teams.head
+    val jamTeam = game.jams.headOption.flatMap(_.teams.headOption).getOrElse(fail("expected a jam team"))
     assertEquals(jamTeam.score, Some(5))
     assertEquals(jamTeam.lead, Some(true))
     assertEquals(jamTeam.lineup, Map("Jammer" -> "s1"))
@@ -65,7 +65,7 @@ class CrgJsonSuite extends munit.FunSuite:
   test("reports malformed JSON and missing required game fields") {
     assert(CrgJson.decode("{").left.toOption.exists(_.startsWith("invalid JSON:")))
     assert(CrgJson.decode("""{"state":{}}""").left.toOption.exists(_.contains("no ScoreBoard.Game")))
-    val missingScore = fixture.replace("Team(2).Score", "Team(2).Other")
+    val missingScore = fixture.replace("Team(2).Score", "Team(2).Other").nn
     assertEquals(
       CrgJson.decode(missingScore),
       Left("state.ScoreBoard.Game(g1).Team(2).Score: missing required integer")

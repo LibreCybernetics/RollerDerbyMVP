@@ -13,8 +13,12 @@ object JsoniterMain:
 
 private object NodeReaderMain:
   def run(source: GameSource): Unit =
-    NodeProcess.exitCode = CliTiming.run(source, NodeProcess.argv.toVector.drop(2),
-      message => js.Dynamic.global.console.error(message))
+    NodeProcess.exitCode = CliTiming.run(
+      source,
+      NodeProcess.argv.toVector.drop(2),
+      message =>
+        val _ = js.Dynamic.global.console.error(message)
+    )
 
 @js.native
 @JSImport("node:process",JSImport.Namespace)

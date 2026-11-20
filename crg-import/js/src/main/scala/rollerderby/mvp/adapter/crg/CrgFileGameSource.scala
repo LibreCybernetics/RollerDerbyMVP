@@ -1,10 +1,12 @@
 package rollerderby.mvp.adapter.crg
 
+import rollerderby.mvp.application.GameSource
+
+import scala.annotation.unused
 import scala.scalajs.js
 import scala.scalajs.js.annotation.JSImport
 import scala.scalajs.js.typedarray.Uint8Array
 import scala.util.Try
-import rollerderby.mvp.application.GameSource
 
 object CrgFileGameSource:
   def apply(): GameSource = apply(CrgJson.decode)
@@ -15,7 +17,7 @@ object CrgFileGameSource:
     val utf8 = new NodeTextDecoder("utf-8", js.Dynamic.literal(fatal = true))
     val readUtf8: String => Either[String, String] = path =>
       Try(utf8.decode(NodeFiles.readFileSync(path))).toEither.left.map { error =>
-        s"cannot read file: ${error.getMessage}"
+        s"cannot read file: ${Option(error.getMessage).getOrElse("null")}"
       }
     new CrgJsonGameSource(readUtf8, decode)
 
@@ -26,5 +28,5 @@ private object NodeFiles extends js.Object:
 
 @js.native
 @JSImport("node:util", "TextDecoder")
-private class NodeTextDecoder(encoding: String, options: js.Object) extends js.Object:
+private class NodeTextDecoder(@unused encoding: String, @unused options: js.Object) extends js.Object:
   def decode(input: Uint8Array): String = js.native

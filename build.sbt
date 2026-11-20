@@ -1,6 +1,31 @@
 import org.scalajs.linker.interface.ModuleKind
 
-scalaVersion := "3.9.0"
+ThisBuild / scalaVersion := "3.9.0"
+
+ThisBuild / semanticdbEnabled := true
+ThisBuild / scalacOptions ++= Seq(
+  "-Wall",
+  "-Werror",
+  "-deprecation",
+  "-feature",
+  "-unchecked",
+  "-Wunused:imports",
+  "-Yexplicit-nulls",
+  "-Yno-flexible-types"
+)
+
+lazy val wartremoverSettings = Seq(
+  wartremoverErrors ++= Seq(
+    Wart.AsInstanceOf,
+    Wart.OptionPartial,
+    Wart.EitherProjectionPartial,
+    Wart.IterableOps,
+    Wart.TryPartial,
+    Wart.Return,
+    Wart.TripleQuestionMark,
+    Wart.Null
+  )
+)
 
 lazy val sampleFixtureSettings = Seq(
   Test / sourceGenerators += Def.task {
@@ -40,12 +65,14 @@ lazy val root = project.in(file("."))
 lazy val core = crossProject(JSPlatform, JVMPlatform)
   .crossType(CrossType.Full)
   .in(file("core"))
+  .settings(wartremoverSettings)
   .settings(publish / skip := true)
 
 lazy val crgImport = crossProject(JSPlatform, JVMPlatform)
   .crossType(CrossType.Full)
   .in(file("crg-import"))
   .dependsOn(core)
+  .settings(wartremoverSettings)
   .settings(sampleFixtureSettings)
   .settings(
     libraryDependencies ++= Seq(
@@ -66,6 +93,7 @@ lazy val cli = crossProject(JSPlatform, JVMPlatform)
   .crossType(CrossType.Full)
   .in(file("cli"))
   .dependsOn(core, crgImport)
+  .settings(wartremoverSettings)
   .settings(sampleFixtureSettings)
   .settings(
     name := "roller-derby-mvp",
@@ -93,4 +121,5 @@ lazy val cliJS = cli.js
 lazy val benchmarks = project.in(file("benchmarks"))
   .enablePlugins(JmhPlugin)
   .dependsOn(crgImportJVM)
+  .settings(wartremoverSettings)
   .settings(publish / skip := true)
