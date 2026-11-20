@@ -2,7 +2,7 @@ package rollerderby.mvp
 
 import scala.collection.mutable.ArrayBuffer
 import rollerderby.mvp.adapter.cli.CommandLine
-import rollerderby.mvp.adapter.crg.CrgJsonGameSource
+import rollerderby.mvp.adapter.crg.{CrgFileGameSource, CrgJsonGameSource}
 import rollerderby.mvp.application.ImportGamesService
 
 class CommandLineSuite extends munit.FunSuite:
@@ -34,4 +34,25 @@ class CommandLineSuite extends munit.FunSuite:
     assert(errors.head.startsWith("bad.json: invalid JSON:"))
     assertEquals(cli.run(Vector("inspect")), 2)
     assertEquals(cli.run(Vector("--help")), 0)
+  }
+
+  test("CLI reports a real sample summary alongside a missing file error") {
+    val out = ArrayBuffer.empty[String]
+    val errors = ArrayBuffer.empty[String]
+    val cli = new CommandLine(
+      new ImportGamesService(CrgFileGameSource()),
+      line => { out += line; () },
+      line => { errors += line; () }
+    )
+    val sample = SampleFixtures.path("STATS-2026-11-13_EMEXRDDiscordias_vs_MexicoCityRollerDerbyMexicoCityAllStars.json")
+    val missing = SampleFixtures.path("missing-fixture-for-cli-test.json")
+
+    assertEquals(cli.run(Vector("inspect", missing, sample)), 1)
+    assertEquals(out.toVector, Vector(
+      s"$sample: 2026-11-13 Game 5: EMEXRD vs. Mexico City Roller Derby (Finished: 97 - 91) " +
+        "[56587f41-6244-4809-9445-184b92b19fd2] | " +
+        "EMEXRD - Discordias 97 (20 rostered) vs Mexico City Roller Derby - Mexico City All Stars 91 (20 rostered) | 36 jams"
+    ))
+    assertEquals(errors.size, 1)
+    assert(errors.head.startsWith(s"$missing: cannot read file:"), errors.head)
   }

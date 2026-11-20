@@ -2,6 +2,33 @@ import org.scalajs.linker.interface.ModuleKind
 
 ThisBuild / scalaVersion := "3.8.3"
 
+lazy val sampleFixtureSettings = Seq(
+  Test / sourceGenerators += Def.task {
+    val directory = (LocalRootProject / baseDirectory).value / "fixtures" / "samples"
+    require(directory.isDirectory, s"Sample fixture directory is missing: $directory")
+    val filenames = (directory * "*.json").get.filter(_.isFile).map(_.getName).sorted
+
+    def quote(value: String): String = "\"" + value.flatMap {
+      case '\\' => "\\\\"
+      case '"'  => "\\\""
+      case '\n' => "\\n"
+      case '\r' => "\\r"
+      case '\t' => "\\t"
+      case char => char.toString
+    } + "\""
+
+    val contents = s"""package rollerderby.mvp
+                       |
+                       |private[mvp] object SampleFixtures:
+                       |  val filenames: Vector[String] = Vector(${filenames.map(quote).mkString(", ")})
+                       |  def path(filename: String): String = ${quote(directory.getAbsolutePath + "/")} + filename
+                       |""".stripMargin
+    val output = (Test / sourceManaged).value / "rollerderby" / "mvp" / "SampleFixtures.scala"
+    if (!output.exists || IO.read(output) != contents) IO.write(output, contents)
+    Seq(output)
+  }.taskValue
+)
+
 lazy val root = project.in(file("."))
   .aggregate(coreJVM, coreJS, crgImportJVM, crgImportJS, cliJVM, cliJS)
   .settings(publish / skip := true)
@@ -15,6 +42,7 @@ lazy val crgImport = crossProject(JSPlatform, JVMPlatform)
   .crossType(CrossType.Full)
   .in(file("crg-import"))
   .dependsOn(core)
+  .settings(sampleFixtureSettings)
   .settings(
     libraryDependencies ++= Seq(
       "com.lihaoyi" %%% "ujson" % "4.4.3",
@@ -22,11 +50,15 @@ lazy val crgImport = crossProject(JSPlatform, JVMPlatform)
     ),
     publish / skip := true
   )
+  .jsSettings(
+    Test / scalaJSLinkerConfig ~= (_.withModuleKind(ModuleKind.CommonJSModule))
+  )
 
 lazy val cli = crossProject(JSPlatform, JVMPlatform)
   .crossType(CrossType.Full)
   .in(file("cli"))
   .dependsOn(core, crgImport)
+  .settings(sampleFixtureSettings)
   .settings(
     name := "roller-derby-mvp",
     Compile / mainClass := Some("rollerderby.mvp.Main"),
