@@ -26,13 +26,15 @@ object CrgDomainMapper:
 
   private def game(id: String, fields: Fields): Game =
     val teams = Map.from(fields.children("Team"))
-    val sides = Vector("1", "2").map { side =>
-      val teamFields = teams.getOrElse(side, invalid(s"${fields.path}.Team($side): missing team"))
-      team(side, teamFields)
-    }
     // CRG uses period zero for its pregame placeholder jam.
     val periods = fields.numberedChildren("Period").collect { case (number, data) if number > 0 =>
       period(number, data)
+    }
+    val sides = Vector("1" -> Side.One, "2" -> Side.Two).map { case (key, side) =>
+      val teamFields = teams.getOrElse(key, invalid(s"${fields.path}.Team($key): missing team"))
+      val fielded = periods.iterator.flatMap(_.jams).flatMap(_.teams).filter(_.side == side)
+        .flatMap(_.fieldings).flatMap(_.skaterId).toSet
+      gameSide(id, side, key, teamFields, fielded)
     }
     val clocks = fields.children("Clock").map { case (name, clock) =>
       ClockSnapshot(
@@ -48,11 +50,12 @@ object CrgDomainMapper:
       id = id,
       name = fields.nonEmptyText("Name"),
       officialScore = fields.boolean("OfficialScore"),
-      teams = sides,
+      sides = sides,
       periods = periods,
       eventDate = fields.calendarTime("EventInfo(Date)", "an ISO local date")(value => LocalDate.parse(value).nn),
       eventStartTime = fields.calendarTime("EventInfo(StartTime)", "an ISO local time")(value => LocalTime.parse(value).nn),
-      clocks = clocks
+      clocks = clocks,
+      tournamentName = fields.nonEmptyText("EventInfo(Tournament)")
     )
 
   private def period(number: Int, fields: Fields): Period =
@@ -88,7 +91,13 @@ object CrgDomainMapper:
     Jam(
       period = period,
       number = number,
-      teams = fields.children("TeamJam").map { case (side, data) => jamTeam(side, data) },
+      teams = fields.children("TeamJam").map { case (key, data) =>
+        val side = key match
+          case "1" => Side.One
+          case "2" => Side.Two
+          case _   => invalid(s"${data.path}: expected game side 1 or 2")
+        jamTeam(side, data)
+      },
       id = fields.nonEmptyText("Id"),
       wallTimeStart = fields.wallTime("WalltimeStart"),
       wallTimeEnd = fields.wallTime("WalltimeEnd"),
@@ -98,12 +107,47 @@ object CrgDomainMapper:
       periodClockDisplayEnd = fields.clock("PeriodClockDisplayEnd")
     )
 
-  private def team(id: String, fields: Fields): Team =
-    val skaters = fields.children("Skater").map { case (skaterId, data) => skater(skaterId, data) }
+  private def gameSide(
+      gameId: String,
+      side: Side,
+      key: String,
+      fields: Fields,
+      fielded: Set[GameSkaterId]
+  ): GameSide =
+    val teamId = fields.nonEmptyText("PreparedTeam").map(TeamId.External.apply)
+      .getOrElse(TeamId.GameLocal(gameId, side))
+    val skaters = fields.children("Skater").map { case (localId, data) =>
+      val id = GameSkaterId(localId)
+      val skaterId = data.nonEmptyText("PreparedSkater").map(SkaterId.External.apply)
+        .getOrElse(SkaterId.GameLocal(gameId, side, id))
+      val skater = GameSkater(
+        id = id,
+        skater = Skater(skaterId, data.text("Name")),
+        rosterNumber = data.text("RosterNumber"),
+        penaltyCount = data.integer("PenaltyCount"),
+        extraPenaltyTime = data.duration("ExtraPenaltyTime")
+      )
+      ListedSkater(skater, data.selection, penalties(id, data))
+    }
+    val selectionIssues = skaters.flatMap(_.selection.left.toOption)
+    val roster =
+      if selectionIssues.nonEmpty then Left(selectionIssues)
+      else
+        val entries = skaters.collect { case ListedSkater(skater, Right(RosterSelection.Selected(captaincy)), _) =>
+          GameRosterEntry(skater.id, skater.skater.id, skater.rosterNumber, captaincy)
+        }
+        GameRoster.create(entries).left.map(issue => Vector(s"${fields.path}: $issue")).flatMap { roster =>
+          val unselected = fielded.diff(entries.iterator.map(_.gameSkaterId).toSet)
+          if unselected.isEmpty then Right(roster)
+          else
+            val ids = unselected.iterator.map(_.value).toVector.sorted.mkString(", ")
+            Left(Vector(s"${fields.path}: jam fieldings reference skaters outside the game roster ($ids)"))
+        }
+
     val boxTrips = fields.children("BoxTrip").map { case (tripId, trip) =>
       BoxTrip(
         id = tripId,
-        currentSkaterId = trip.nonEmptyText("CurrentSkater"),
+        currentSkaterId = trip.nonEmptyText("CurrentSkater").map(GameSkaterId.apply),
         startFieldingId = trip.nonEmptyText("StartFielding"),
         endFieldingId = trip.nonEmptyText("EndFielding"),
         wallTimeStart = trip.wallTime("WalltimeStart"),
@@ -114,12 +158,22 @@ object CrgDomainMapper:
         clockTime = trip.clock("Time")
       )
     }
-    val name = fields.nonEmptyText("FullName").orElse(fields.nonEmptyText("Name")).getOrElse(s"Team $id")
-    Team(id, name, fields.nonEmptyText("PreparedTeam"), fields.requiredInt("Score"), skaters, boxTrips)
+    val name = fields.nonEmptyText("FullName").orElse(fields.nonEmptyText("Name")).getOrElse(s"Team $key")
+    GameSide(
+      side = side,
+      teamId = teamId,
+      name = name,
+      score = fields.requiredInt("Score"),
+      roster = roster,
+      listedSkaters = skaters.filterNot(_.selection.contains(RosterSelection.BenchStaff)).map(_.record),
+      penalties = skaters.flatMap(_.penalties),
+      boxTrips = boxTrips
+    )
 
-  private def skater(id: String, fields: Fields): Skater =
-    val penalties = fields.numberedChildren("Penalty").map { case (number, penalty) =>
+  private def penalties(id: GameSkaterId, fields: Fields): Vector[Penalty] =
+    fields.numberedChildren("Penalty").map { case (number, penalty) =>
       Penalty(
+        skaterId = id,
         number = number,
         id = penalty.nonEmptyText("Id"),
         jamId = penalty.nonEmptyText("Jam"),
@@ -127,24 +181,11 @@ object CrgDomainMapper:
         enteredAt = penalty.instant("Time")
       )
     }
-    Skater(
-      id = id,
-      name = fields.text("Name"),
-      rosterNumber = fields.text("RosterNumber"),
-      preparedSkaterId = fields.nonEmptyText("PreparedSkater"),
-      penaltyCount = fields.integer("PenaltyCount"),
-      penalties = penalties,
-      extraPenaltyTime = fields.duration("ExtraPenaltyTime")
-    )
 
-  private def jamTeam(id: String, fields: Fields): JamTeam =
-    val fieldings = fields.children("Fielding")
-    val lineup = fieldings.flatMap { case (position, fielding) =>
-      fielding.nonEmptyText("Skater").map(position -> _)
-    }.toMap
-    val fieldingIds = fieldings.flatMap { case (position, fielding) =>
-      fielding.nonEmptyText("Id").map(position -> _)
-    }.toMap
+  private def jamTeam(side: Side, fields: Fields): JamTeam =
+    val fieldings = fields.children("Fielding").map { case (position, fielding) =>
+      Fielding(position, fielding.nonEmptyText("Skater").map(GameSkaterId.apply), fielding.nonEmptyText("Id"))
+    }
     val trips = fields.numberedChildren("ScoringTrip").map { case (number, trip) =>
       ScoringTrip(
         number = number,
@@ -155,7 +196,17 @@ object CrgDomainMapper:
         duration = trip.duration("Duration")
       )
     }
-    JamTeam(id, fields.integer("JamScore"), fields.boolean("Lead"), lineup, trips, fieldingIds)
+    JamTeam(side, fields.integer("JamScore"), fields.boolean("Lead"), fieldings, trips)
+
+  private enum RosterSelection derives CanEqual:
+    case Selected(captaincy: Option[Captaincy])
+    case Alternate, BenchStaff
+
+  private final case class ListedSkater(
+      record: GameSkater,
+      selection: Either[String, RosterSelection],
+      penalties: Vector[Penalty]
+  )
 
   private final case class Fields(path: String, entries: Vector[(String, CrgValue)]):
     private lazy val values = entries.toMap
@@ -183,6 +234,16 @@ object CrgDomainMapper:
       field(key, "a string") { case CrgValue.Text(value) => Some(value) }
 
     def nonEmptyText(key: String): Option[String] = text(key).filter(_.nonEmpty)
+
+    def selection: Either[String, RosterSelection] = values.get("Flags") match
+      case Some(CrgValue.Text(""))    => Right(RosterSelection.Selected(None))
+      case Some(CrgValue.Text("C"))   => Right(RosterSelection.Selected(Some(Captaincy.Captain)))
+      case Some(CrgValue.Text("A"))   => Right(RosterSelection.Selected(Some(Captaincy.AlternateCaptain)))
+      case Some(CrgValue.Text("ALT")) => Right(RosterSelection.Alternate)
+      case Some(CrgValue.Text("BA" | "B")) => Right(RosterSelection.BenchStaff)
+      case None | Some(CrgValue.NullValue) => Left(s"$path.Flags: missing roster selection flag")
+      case Some(CrgValue.Text(flag)) => Left(s"$path.Flags: unknown roster selection flag '$flag'")
+      case Some(_) => Left(s"$path.Flags: expected a string")
 
     def integer(key: String): Option[Int] =
       field(key, "an integer") {

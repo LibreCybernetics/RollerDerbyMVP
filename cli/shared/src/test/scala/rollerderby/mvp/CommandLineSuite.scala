@@ -14,6 +14,7 @@ class CommandLineSuite extends munit.FunSuite:
         "ScoreBoard.Game(g1).Team(1).FullName": "League A - Coyotes",
         "ScoreBoard.Game(g1).Team(1).Score": 12,
         "ScoreBoard.Game(g1).Team(1).Skater(s1).Name": "Águila",
+        "ScoreBoard.Game(g1).Team(1).Skater(s1).Flags": "",
         "ScoreBoard.Game(g1).Team(2).Name": "Owls",
         "ScoreBoard.Game(g1).Team(2).Score": 5,
         "ScoreBoard.Game(g1).Period(1).Jam(10).TeamJam(1).JamScore": 7,
@@ -31,12 +32,28 @@ class CommandLineSuite extends munit.FunSuite:
 
       assertEquals(cli.run(Vector("inspect", "bad.json", "game.json")), 1)
       assertEquals(out.toVector, Vector(
-        "game.json: Tournament game [g1] | League A - Coyotes 12 (1 rostered) vs Owls 5 (0 rostered) | 2 jams"
+        "game.json: Tournament game [g1] | League A - Coyotes 12 (1 on game roster) vs Owls 5 (0 on game roster) | 2 jams"
       ))
       assert(errors.headOption.exists(_.startsWith("bad.json: invalid JSON:")), errors.toVector)
       assertEquals(cli.run(Vector("inspect")), 2)
       assertEquals(cli.run(Vector("--help")), 0)
     }
+  }
+
+  test("CLI reports unresolved game rosters alongside scores and jams") {
+    val out = ArrayBuffer.empty[String]
+    val errors = ArrayBuffer.empty[String]
+    val unknownFlag = fixture.replace("Skater(s1).Flags\": \"\"", "Skater(s1).Flags\": \"?\"").nn
+    val source = new CrgJsonGameSource(_ => Right(unknownFlag))
+    val cli = new CommandLine(new ImportGamesService(source), line => { out += line; () }, line => { errors += line; () })
+
+    assertEquals(cli.run(Vector("inspect", "game.json")), 0)
+    assertEquals(out.toVector, Vector(
+      "game.json: Tournament game [g1] | League A - Coyotes 12 (game roster unavailable) vs Owls 5 (0 on game roster) | 2 jams"
+    ))
+    assertEquals(errors.toVector, Vector(
+      "game.json: state.ScoreBoard.Game(g1).Team(1).Skater(s1).Flags: unknown roster selection flag '?'"
+    ))
   }
 
   test("CLI reports a real sample summary alongside a missing file error") {
@@ -54,7 +71,7 @@ class CommandLineSuite extends munit.FunSuite:
     assertEquals(out.toVector, Vector(
       s"$sample: 2026-11-13 Game 5: EMEXRD vs. Mexico City Roller Derby (Finished: 97 - 91) " +
         "[56587f41-6244-4809-9445-184b92b19fd2] | " +
-        "EMEXRD - Discordias 97 (20 rostered) vs Mexico City Roller Derby - Mexico City All Stars 91 (20 rostered) | 36 jams"
+        "EMEXRD - Discordias 97 (15 on game roster) vs Mexico City Roller Derby - Mexico City All Stars 91 (15 on game roster) | 36 jams"
     ))
     assertEquals(errors.size, 1)
     assert(errors.headOption.exists(_.startsWith(s"$missing: cannot read file:")), errors.toVector)

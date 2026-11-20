@@ -57,7 +57,9 @@ Place sample exports in [fixtures/samples](fixtures/samples/). If known, include
 
 Use `CrgFileGameSource().loadRaw(path)` to inspect the complete JSON export as a `CrgExport`. Object members retain their order and duplicate keys, and numbers retain their original tokens. `CrgDomainMapper.toGames(export)` maps game records under `state.ScoreBoard.Game(id)` from single-game and full scoreboard exports. `CrgFileGameSource().load(path)` runs both stages.
 
-The domain uses `Instant` for wall-clock timestamps, `Duration` for recorded durations, and `ClockReading` for positions on a scoreboard clock. Zero wall-clock endpoints indicate missing timestamps. Clock readings and durations retain explicit zeros and signed values. Event date and start time are local calendar values, and each period can also carry the scoreboard host's recorded zoned start time. The `inspect` command summarizes scores, roster counts, and the number of historical jams.
+The domain uses `Instant` for wall-clock timestamps, `Duration` for recorded durations, and `ClockReading` for positions on a scoreboard clock. Zero wall-clock endpoints indicate missing timestamps. Clock readings and durations retain explicit zeros and signed values. Event date and start time are local calendar values, and each period can also carry the scoreboard host's recorded zoned start time.
+
+The `inspect` command summarizes scores, selected game-roster counts, and historical jams. Roster issues are reported alongside the game summary. Use `ImportGamesService.importTournament` to assemble an explicitly grouped set of files. Prepared IDs link teams and skaters across those games. A game's listed skaters remain available as charter evidence, including alternates. Supply charter rosters to validate that the selected skaters belong to each team's charter.
 
 ## Source layout
 

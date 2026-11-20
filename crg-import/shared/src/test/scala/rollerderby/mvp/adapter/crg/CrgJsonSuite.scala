@@ -1,5 +1,7 @@
 package rollerderby.mvp.adapter.crg
 
+import rollerderby.mvp.domain.{Captaincy, Fielding, GameSkaterId, SkaterId, TeamId}
+
 class CrgJsonSuite extends munit.FunSuite:
   private val fixture = """
     {
@@ -15,6 +17,7 @@ class CrgJsonSuite extends munit.FunSuite:
         "ScoreBoard.Game(g1).Team(1).Skater(s1).RosterNumber": "01",
         "ScoreBoard.Game(g1).Team(1).Skater(s1).PreparedSkater": "skater-a",
         "ScoreBoard.Game(g1).Team(1).Skater(s1).PenaltyCount": 1,
+        "ScoreBoard.Game(g1).Team(1).Skater(s1).Flags": "C",
         "ScoreBoard.Game(g1).Team(1).Skater(s1).UnknownField": {},
         "ScoreBoard.Game(g1).Team(2).Name": "Owls",
         "ScoreBoard.Game(g1).Team(2).Score": 5,
@@ -35,20 +38,22 @@ class CrgJsonSuite extends munit.FunSuite:
     val Vector(game) = CrgJson.decode(fixture).fold(error => fail(error), identity): @unchecked
     assertEquals(game.id, "g1")
     assertEquals(game.officialScore, Some(true))
-    val team = game.teams.headOption.getOrElse(fail("expected a team"))
+    val team = game.sides.headOption.getOrElse(fail("expected a team"))
     assertEquals(team.name, "League A - Coyotes")
-    assertEquals(team.preparedTeamId, Some("team-a"))
+    assertEquals(team.teamId, TeamId.External("team-a"))
     assertEquals(team.score, 12)
-    val skater = team.skaters.headOption.getOrElse(fail("expected a skater"))
-    assertEquals(skater.name, Some("Águila"))
+    val skater = team.listedSkaters.headOption.getOrElse(fail("expected a skater"))
+    assertEquals(skater.skater.name, Some("Águila"))
     assertEquals(skater.rosterNumber, Some("01"))
-    assertEquals(skater.preparedSkaterId, Some("skater-a"))
+    assertEquals(skater.skater.id, SkaterId.External("skater-a"))
     assertEquals(skater.penaltyCount, Some(1))
+    val roster = team.roster.fold(issues => fail(issues.mkString(", ")), identity)
+    assertEquals(roster.entries.map(_.captaincy), Vector(Some(Captaincy.Captain)))
     assertEquals(game.jams.map(jam => jam.period -> jam.number), Vector(1 -> 2, 1 -> 10))
     val jamTeam = game.jams.headOption.flatMap(_.teams.headOption).getOrElse(fail("expected a jam team"))
     assertEquals(jamTeam.score, Some(5))
     assertEquals(jamTeam.lead, Some(true))
-    assertEquals(jamTeam.lineup, Map("Jammer" -> "s1"))
+    assertEquals(jamTeam.fieldings, Vector(Fielding("Jammer", Some(GameSkaterId("s1")), None), Fielding("Pivot", None, None)))
     assertEquals(jamTeam.trips.map(_.score), Vector(Some(5)))
     assertEquals(jamTeam.trips.map(_.afterStarPass), Vector(Some(false)))
   }

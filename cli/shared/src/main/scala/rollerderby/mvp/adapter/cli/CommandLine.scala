@@ -17,7 +17,13 @@ final class CommandLine(
     case "inspect" +: paths if paths.nonEmpty =>
       val results = importGames.inspect(paths)
       results.foreach {
-        case Right(imported) => imported.games.foreach(game => printOut(summary(imported.path, game)))
+        case Right(imported) =>
+          imported.games.foreach { game =>
+            printOut(summary(imported.path, game))
+            game.sides.flatMap(_.roster.left.toOption.toVector.flatten).foreach { issue =>
+              printError(s"${imported.path}: $issue")
+            }
+          }
         case Left(error)     => printError(s"${error.path}: ${error.detail}")
       }
       if results.exists(_.isLeft) then 1 else 0
@@ -27,7 +33,8 @@ final class CommandLine(
 
   private def summary(path: String, game: Game): String =
     val name = game.name.fold(game.id)(name => s"$name [${game.id}]")
-    val teams = game.teams.map { team =>
-      s"${team.name} ${team.score} (${team.skaters.size} rostered)"
+    val teams = game.sides.map { side =>
+      val roster = side.roster.fold(_ => "game roster unavailable", value => s"${value.entries.size} on game roster")
+      s"${side.name} ${side.score} ($roster)"
     }.mkString(" vs ")
     s"$path: $name | $teams | ${game.jams.size} jams"
