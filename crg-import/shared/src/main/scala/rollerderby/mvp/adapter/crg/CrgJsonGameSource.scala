@@ -2,7 +2,7 @@ package rollerderby.mvp.adapter.crg
 
 import rollerderby.mvp.application.GameSource
 import rollerderby.mvp.domain.Game
-import ujson.{Null, Num, Obj, Value}
+import ujson.{Num, Obj, Value}
 
 final class CrgJsonGameSource(
     readUtf8: String => Either[String, String],
@@ -30,7 +30,7 @@ object CrgJson:
         Left(s"invalid JSON: ${Option(error.getMessage).getOrElse("null")}")
 
   private given CrgGames.FieldReader[Value] with
-    def isNull(value: Value): Boolean = value == Null
+    def isNull(value: Value): Boolean = value.isNull
     def text(value: Value): Option[String] = value.strOpt
     def integer(value: Value): Option[Int] = value match
       case Num(number) if number.isValidInt => Some(number.toInt)

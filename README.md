@@ -18,13 +18,13 @@ Pass multiple paths to inspect multiple exports. The command reports file and fi
 
 ### Compiler and lint checks
 
-Application, test, and benchmark code compile with Scala 3 warnings treated as errors, explicit nulls for Scala and Java interop, and WartRemover checks for unsafe operations.
+Application, test, and benchmark code compile with Scala 3 warnings treated as errors, strict equality, explicit nulls for Scala and Java interop, and WartRemover checks for unsafe operations. The Scala.js linker validates its intermediate representation.
 
 ```sh
 sbt 'scalafixAll --check; benchmarks/scalafixAll --check'
 ```
 
-Scalafix checks import organization and redundant syntax. To apply a fix, run the task for one project at a time, for example `sbt 'crgImportJVM/scalafixAll'`. JVM and Scala.js projects share source files.
+Scalafix checks explicit result types on public and protected members, import organization, and redundant syntax. To apply a fix, run the task for one project at a time, for example `sbt 'crgImportJVM/scalafixAll'`. JVM and Scala.js projects share source files.
 
 ### Mutation testing and microbenchmarks
 

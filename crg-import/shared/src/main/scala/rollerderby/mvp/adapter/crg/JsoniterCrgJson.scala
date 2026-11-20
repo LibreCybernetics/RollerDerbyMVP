@@ -17,13 +17,13 @@ object JsoniterCrgJson:
     catch
       case error: JsonReaderException => Left(s"invalid JSON: ${Option(error.getMessage).getOrElse("null")}")
 
-  private enum FieldValue:
+  private enum FieldValue derives CanEqual:
     case NullValue, Other
     case Text(value: String)
     case Integer(value: Int)
     case BooleanValue(value: Boolean)
 
-  private enum Export:
+  private enum Export derives CanEqual:
     case State(fields: mutable.LinkedHashMap[String, FieldValue])
     case NoState, NotAnObject
 

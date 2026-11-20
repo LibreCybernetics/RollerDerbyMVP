@@ -10,21 +10,33 @@ ThisBuild / scalacOptions ++= Seq(
   "-feature",
   "-unchecked",
   "-Wunused:imports",
+  "-language:strictEquality",
   "-Yexplicit-nulls",
   "-Yno-flexible-types"
 )
 
 lazy val wartremoverSettings = Seq(
   wartremoverErrors ++= Seq(
+    Wart.ArrayEquals,
     Wart.AsInstanceOf,
-    Wart.OptionPartial,
     Wart.EitherProjectionPartial,
+    Wart.GetOrElseNull,
+    Wart.GlobalExecutionContext,
+    Wart.IsInstanceOf,
     Wart.IterableOps,
-    Wart.TryPartial,
+    Wart.Null,
+    Wart.OptionPartial,
+    Wart.PartialFunctionApply,
+    Wart.PlatformDefault,
     Wart.Return,
+    Wart.SeqApply,
     Wart.TripleQuestionMark,
-    Wart.Null
+    Wart.TryPartial
   )
+)
+
+lazy val scalaJSValidationSettings = Seq(
+  scalaJSLinkerConfig ~= (_.withCheckIR(true))
 )
 
 lazy val sampleFixtureSettings = Seq(
@@ -66,6 +78,7 @@ lazy val core = crossProject(JSPlatform, JVMPlatform)
   .crossType(CrossType.Full)
   .in(file("core"))
   .settings(wartremoverSettings)
+  .jsSettings(scalaJSValidationSettings)
   .settings(publish / skip := true)
 
 lazy val crgImport = crossProject(JSPlatform, JVMPlatform)
@@ -74,6 +87,7 @@ lazy val crgImport = crossProject(JSPlatform, JVMPlatform)
   .dependsOn(core)
   .settings(wartremoverSettings)
   .settings(sampleFixtureSettings)
+  .jsSettings(scalaJSValidationSettings)
   .settings(
     libraryDependencies ++= Seq(
       "com.lihaoyi" %% "ujson" % "4.4.3",
@@ -95,6 +109,7 @@ lazy val cli = crossProject(JSPlatform, JVMPlatform)
   .dependsOn(core, crgImport)
   .settings(wartremoverSettings)
   .settings(sampleFixtureSettings)
+  .jsSettings(scalaJSValidationSettings)
   .settings(
     name := "roller-derby-mvp",
     Compile / mainClass := Some("rollerderby.mvp.Main"),

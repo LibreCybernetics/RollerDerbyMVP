@@ -21,7 +21,7 @@ private[mvp] object UjsonSelectiveControl:
     }
 
   private given CrgGames.FieldReader[Value] with
-    def isNull(value: Value): Boolean = value == Null
+    def isNull(value: Value): Boolean = value.isNull
     def text(value: Value): Option[String] = value.strOpt
     def integer(value: Value): Option[Int] = value match
       case Num(number) if number.isValidInt => Some(number.toInt)

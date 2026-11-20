@@ -6,7 +6,7 @@ final case class Game(
     officialScore: Option[Boolean],
     teams: Vector[Team],
     jams: Vector[Jam]
-)
+) derives CanEqual
 
 final case class Team(
     id: String,
