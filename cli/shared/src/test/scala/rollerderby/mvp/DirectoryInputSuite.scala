@@ -31,7 +31,7 @@ class DirectoryInputSuite extends munit.FunSuite:
     val stats = run(tournament, sampleDirectory)
     assertEquals(stats.status, 0)
     assertEquals(stats, run(tournament, files*))
-    assertEquals(stats.out.lastOption, Some("Star-pass timing: 0 of 178 team passes verified · 470m21s unattributed skater time"))
+    assertEquals(stats.out.lastOption, Some("Star-pass timing: 178 team passes recorded · 470m21s unattributed skater time"))
     val rows = SkaterStatisticsOutput.rows(stats.out)
     val (overall, byRole) = rows.partition(_.lift(2).contains("All roles"))
     def penaltiesIn(rows: Vector[Vector[String]]): Int =

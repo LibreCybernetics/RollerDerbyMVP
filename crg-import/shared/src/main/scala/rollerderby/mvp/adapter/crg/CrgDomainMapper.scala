@@ -164,7 +164,11 @@ object CrgDomainMapper:
         jamClockStart = trip.clock("JamClockStart"),
         jamClockEnd = trip.clock("JamClockEnd"),
         duration = trip.duration("Duration"),
-        clockTime = trip.clock("Time")
+        clockTime = trip.clock("Time"),
+        startAfterStarPass = trip.boolean("StartAfterSP"),
+        endAfterStarPass = trip.boolean("EndAfterSP"),
+        startBetweenJams = trip.boolean("StartBetweenJams"),
+        endBetweenJams = trip.boolean("EndBetweenJams")
       )
     }
     val name = fields.nonEmptyText("FullName").orElse(fields.nonEmptyText("Name")).getOrElse(s"Team ${source.token}")
@@ -186,9 +190,7 @@ object CrgDomainMapper:
         id = penalty.nonEmptyText("Id").map(token => PenaltyId(ExternalId.fromString(token))),
         jam = references.jam(penalty, "Jam"),
         boxTrip = references.boxTrip(id.side.side, penalty, "BoxTrip"),
-        enteredAt = penalty.instant("Time"),
-        occurredAtJamTime = penalty.duration("MVP.OccurredAtElapsedMillis"),
-        afterStarPass = penalty.boolean("MVP.AfterStarPass")
+        enteredAt = penalty.instant("Time")
       )
     }
 
@@ -218,7 +220,6 @@ object CrgDomainMapper:
       fieldings = fieldings,
       trips = trips,
       starPass = fields.boolean("StarPass"),
-      starPassElapsed = fields.duration("MVP.StarPassElapsedMillis"),
       afterStarPassScore = fields.integer("AfterSPScore"),
       starPassTrip = references.starPassTrip(key, side, fields, tripFields)
     )

@@ -7,7 +7,7 @@ final class CrgJsonGameSource(
     readUtf8: String => Either[String, String],
     parse: CrgJsonGameSource.Parser = CrgJson.parse
 ) extends GameSource:
-  def readText(path: String): Either[String, String] = readUtf8(path)
+  private[mvp] def readText(path: String): Either[String, String] = readUtf8(path)
 
   def loadRaw(path: String): Either[String, CrgExport] = readText(path).flatMap(parse)
 

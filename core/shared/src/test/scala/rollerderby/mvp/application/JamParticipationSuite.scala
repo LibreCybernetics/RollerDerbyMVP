@@ -30,15 +30,17 @@ class JamParticipationSuite extends munit.FunSuite:
   private def analyze(
       penalties: Vector[Penalty] = Vector.empty,
       opposingTrips: Vector[ScoringTrip] = Vector.empty,
-      opposingScore: Int = 0
+      opposingScore: Int = 0,
+      elapsed: Option[Duration] = Some(passTime),
+      boxEndpoints: Vector[BoxTripPassWindows.Endpoint] = Vector.empty
   ): (JamStatistics, SkaterStatisticsRow) =
     val teams = Vector(
       JamTeam(Side.One, Some(4), None, lineup, Vector.empty,
-        starPass = Some(true), starPassElapsed = Some(passTime), afterStarPassScore = Some(2)),
+        starPass = Some(true), starPassElapsed = elapsed, afterStarPassScore = Some(2)),
       JamTeam(Side.Two, Some(opposingScore), None, Vector.empty, opposingTrips, starPass = Some(false))
     )
     val jam = Jam(jamKey, teams, duration = Some(Duration.ofMinutes(1).nn), starPass = Some(true))
-    val result = JamParticipation.analyze(jam, Map(pivot -> skater), penalties)
+    val result = JamParticipation.analyze(jam, Map(pivot -> skater), penalties, boxEndpoints)
     assertEquals(result.rows.size, 1)
     (result, result.rows.headOption.getOrElse(fail("expected the pivot's participation")))
 
@@ -114,4 +116,34 @@ class JamParticipationSuite extends munit.FunSuite:
       assertEquals(forRole(row, SkaterJamRole.Pack).pointsAgainst, PointTotal(0, partial = true))
       assertEquals(forRole(row, SkaterJamRole.Jammer).pointsAgainst, PointTotal(0, partial = true))
     }
+  }
+
+  test("same-side box endpoints credit only time outside a candidate window") {
+    def endpoint(side: Side, elapsed: Long, after: Boolean) =
+      BoxTripPassWindows.Endpoint(FieldingId(jamKey, side, FieldingPosition.Pivot), Duration.ofSeconds(elapsed).nn, after)
+    val endpoints = Vector(
+      endpoint(Side.One, 20, false),
+      endpoint(Side.One, 45, true),
+      endpoint(Side.Two, 55, false),
+      endpoint(Side.One, 65, true)
+    )
+    val (report, estimated) = analyze(penalties = Vector(penalty(1, 15)), elapsed = None, boxEndpoints = endpoints)
+    assertEquals(report.coverage.estimated, 1)
+    assertEquals(report.coverage.verified, 0)
+    val pack = forRole(estimated, SkaterJamRole.Pack)
+    val jammer = forRole(estimated, SkaterJamRole.Jammer)
+    assertEquals((pack.activeJamTime.getSeconds, jammer.activeJamTime.getSeconds, estimated.unattributedJamTime.getSeconds),
+      (20L, 15L, 25L))
+    assert(pack.timePartial && pack.includesBoxEstimate && jammer.timePartial && jammer.includesBoxEstimate)
+    assertEquals(estimated.penaltiesWithoutRole, 1)
+
+    val (verifiedReport, verified) = analyze(boxEndpoints = endpoints)
+    assertEquals(verifiedReport.coverage.estimated, 0)
+    assertEquals(verified.unattributedJamTime.getSeconds, 0L)
+    assertEquals(forRole(verified, SkaterJamRole.Pack).activeJamTime.getSeconds, 30L)
+    assert(!forRole(verified, SkaterJamRole.Pack).includesBoxEstimate)
+
+    val (conflictReport, conflict) = analyze(elapsed = None, boxEndpoints = endpoints :+ endpoint(Side.One, 50, false))
+    assertEquals(conflictReport.coverage.estimated, 0)
+    assertEquals(conflict.unattributedJamTime.getSeconds, 60L)
   }

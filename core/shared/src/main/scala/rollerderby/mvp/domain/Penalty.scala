@@ -28,5 +28,9 @@ final case class BoxTrip(
     jamClockStart: Option[ClockReading],
     jamClockEnd: Option[ClockReading],
     duration: Option[Duration],
-    clockTime: Option[ClockReading]
+    clockTime: Option[ClockReading],
+    startAfterStarPass: Option[Boolean] = None,
+    endAfterStarPass: Option[Boolean] = None,
+    startBetweenJams: Option[Boolean] = None,
+    endBetweenJams: Option[Boolean] = None
 )

@@ -34,32 +34,9 @@ Each team has its own section. Each skater's number and name appear once per bre
 
 `Points for` and `Points against` are the team's and opponent's scores during the skater's participation. The overall row uses the recorded jam scores. When a skater switches roles, the report uses the team's recorded after-pass score and any scoring trips that can be placed within a single role interval. Uncertain allocations and missing scores make the relevant totals partial. Penalty and scoring rates divide the totals by active jam minutes, using recorded precision. `—` indicates an unavailable rate when the duration is zero or the relevant count or time is incomplete.
 
-#### Verified event timing
-
-Supply verified event times and order in a UTF-8 tab-separated file.
-
-```sh
-sbt 'cliJVM/run skater-stats --by tournament --event-timings timings.tsv fixtures/samples/'
-```
-
-Use these record layouts with a tab between every field. Blank lines and lines starting with `#` are accepted.
-
-```text
-star-pass	game-id	period	jam	side	elapsed-ms
-penalty	game-id	period	jam	side	game-skater-id	penalty-number	elapsed-ms-or--	before-after-or--
-```
-
-`side` is the CRG team number, `1` or `2`. Use the skater ID from the game's `Team(side).Skater(id)` record. Time is measured in elapsed jam-clock milliseconds. For penalty records, use `before` or `after` relative to the skater's own team's pass, or `-` for an omitted time or order. Supply at least one of the two penalty fields. Conflicting or invalid records produce line-specific errors.
-
-The existing optional `MVP` fields in the flattened CRG `state` object are also supported. The timing file may add data to those annotations or repeat identical values.
-
-| Key | Value |
-|---|---|
-| `ScoreBoard.Game(gameId).Period(1).Jam(1).TeamJam(1).MVP.StarPassElapsedMillis` | Verified pass time, for example `35000` |
-| `ScoreBoard.Game(gameId).Team(1).Skater(skaterId).Penalty(1).MVP.OccurredAtElapsedMillis` | Verified penalty occurrence time within its linked jam, for example `50000` |
-| `ScoreBoard.Game(gameId).Team(1).Skater(skaterId).Penalty(1).MVP.AfterStarPass` | Verified event order, `false` before or `true` after the skater's team passed the star |
-
 CRG records star passes separately for each team. The linked scoring trip identifies the pass in the scoresheet. The report's timing summary counts each team pass separately and shows the amount of skater time still unattributed. Penalty entry time can lag behind the occurrence. A penalty with an uncertain role stays in the overall count and appears in `Penalties without role`. A penalty without a resolved jam contributes to both unassigned columns.
+
+Use `--box-trip-estimates` to include partial role time from penalty-box records. The latest same-team box event marked before the pass and the earliest marked after it bracket the pass. The report credits time outside that window to the corresponding roles, labels those durations as box estimates, and leaves the window unattributed. It requires a resolved fielding in the same jam, an in-jam clock value, and explicit phase flags. Penalty and point attribution continue to use their existing evidence.
 
 Tournament totals cover all games in the supplied files. Identical game records count once. An import failure or conflicting records for a game prevent tournament totals from being printed. Prepared team and skater IDs link appearances across games. Game-local IDs are displayed with their source game and side and are flagged in a warning.
 

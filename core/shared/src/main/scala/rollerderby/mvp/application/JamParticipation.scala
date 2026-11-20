@@ -8,17 +8,25 @@ import java.time.Duration
 private object JamParticipation:
   private enum Timeline derives CanEqual:
     case Fixed(role: SkaterJamRole)
-    case StarPass(before: SkaterJamRole, after: SkaterJamRole, elapsed: Option[Duration])
+    case StarPass(
+        before: SkaterJamRole, after: SkaterJamRole, elapsed: Option[Duration], window: Option[BoxTripPassWindows.Window]
+    )
     case Unknown
 
   def analyze(
       jam: Jam,
       skaters: Map[GameSkaterId, StatisticSkater],
-      penalties: Vector[Penalty]
+      penalties: Vector[Penalty],
+      boxEndpoints: Vector[BoxTripPassWindows.Endpoint] = Vector.empty
   ): JamStatistics =
     val bySkater = penalties.groupBy(_.skaterId)
     val duration = StarPassEvidence.duration(jam)
     val evidence = jam.teams.map(team => team -> StarPassEvidence.forTeam(jam, team))
+    val windows = evidence.flatMap {
+      case (team, StarPassEvidence.Result(StarPassEvidence.Status.Confirmed(None), _)) if team.starPassElapsed.isEmpty =>
+        duration.flatMap(BoxTripPassWindows.window(boxEndpoints, team.side, _)).map(team.side -> _)
+      case _ => None
+    }.toMap
     val fielded = evidence.flatMap { case (team, pass) =>
       val positions = team.fieldings.filterNot(_.notFielded).flatMap { fielding =>
         fielding.skater.flatMap(_.resolved).map(_ -> fielding.id.position)
@@ -26,7 +34,7 @@ private object JamParticipation:
       val opponent = jam.teams.find(_.side != team.side)
       positions.iterator.flatMap { case (id, lineupPositions) =>
         skaters.get(id).map { skater =>
-          id -> participation(skater, timeline(pass.status, lineupPositions.toSet), team, opponent, duration,
+          id -> participation(skater, timeline(pass.status, lineupPositions.toSet, windows.get(team.side)), team, opponent, duration,
             bySkater.getOrElse(id, Vector.empty))
         }
       }
@@ -72,20 +80,22 @@ private object JamParticipation:
     JamStatistics(
       jam.key,
       fielded.valuesIterator.toVector ++ penaltiesOnly,
-      StarPassCoverage(passes.size, passes.count(_.isDefined)),
+      StarPassCoverage(passes.size, passes.count(_.isDefined), windows.size),
       evidence.flatMap(_._2.warnings) ++ summaryWarning ++ penaltyWarnings
     )
 
-  private def timeline(pass: StarPassEvidence.Status, positions: Set[FieldingPosition]): Timeline =
+  private def timeline(
+      pass: StarPassEvidence.Status, positions: Set[FieldingPosition], window: Option[BoxTripPassWindows.Window]
+  ): Timeline =
     val roles = positions.flatMap {
       case FieldingPosition.Jammer => Some(Jammer)
       case FieldingPosition.Pivot | FieldingPosition.Blocker1 | FieldingPosition.Blocker2 | FieldingPosition.Blocker3 => Some(Pack)
       case FieldingPosition.Other(_) => None
     }
     (roles.toVector, pass) match
-      case (Vector(Jammer), StarPassEvidence.Status.Confirmed(elapsed)) => Timeline.StarPass(Jammer, Pack, elapsed)
+      case (Vector(Jammer), StarPassEvidence.Status.Confirmed(elapsed)) => Timeline.StarPass(Jammer, Pack, elapsed, window)
       case (Vector(Pack), StarPassEvidence.Status.Confirmed(elapsed)) if positions.contains(FieldingPosition.Pivot) =>
-        Timeline.StarPass(Pack, Jammer, elapsed)
+        Timeline.StarPass(Pack, Jammer, elapsed, window)
       case (Vector(Jammer), StarPassEvidence.Status.Conflict) => Timeline.Unknown
       case (Vector(Pack), StarPassEvidence.Status.Conflict) if positions.contains(FieldingPosition.Pivot) => Timeline.Unknown
       case (Vector(role), _) => Timeline.Fixed(role)
@@ -121,28 +131,31 @@ private object JamParticipation:
           unattributedTimePartial = overall.timePartial,
           penaltiesWithoutRole = penalties.size
         )
-      case Timeline.StarPass(before, after, elapsed) =>
+      case Timeline.StarPass(before, after, elapsed, window) =>
         val penaltyOrder = penalties.map(penalty => penaltyAfterPass(penalty, duration, elapsed))
         val unknownPenalties = penaltyOrder.count(_.isEmpty)
         val (forBefore, forAfter) = ownPoints(team).getOrElse(pointsByTime(Some(team), duration, elapsed))
         val (againstBefore, againstAfter) = pointsByTime(opponent, duration, elapsed)
         val first = ParticipationTotals(
           jams = 1,
-          activeJamTime = elapsed.getOrElse(Duration.ZERO.nn),
+          activeJamTime = elapsed.orElse(window.map(_.earliest)).getOrElse(Duration.ZERO.nn),
           timePartial = elapsed.isEmpty,
           penalties = penaltyOrder.count(_.contains(false)),
           penaltiesPartial = unknownPenalties > 0,
           pointsFor = forBefore,
-          pointsAgainst = againstBefore
+          pointsAgainst = againstBefore,
+          includesBoxEstimate = window.exists(estimate => !estimate.earliest.isZero)
         )
         val second = ParticipationTotals(
           jams = 1,
-          activeJamTime = elapsed.fold(Duration.ZERO.nn)(time => overall.activeJamTime.minus(time).nn),
+          activeJamTime = elapsed.orElse(window.map(_.latest))
+            .fold(Duration.ZERO.nn)(time => overall.activeJamTime.minus(time).nn),
           timePartial = elapsed.isEmpty,
           penalties = penaltyOrder.count(_.contains(true)),
           penaltiesPartial = unknownPenalties > 0,
           pointsFor = forAfter,
-          pointsAgainst = againstAfter
+          pointsAgainst = againstAfter,
+          includesBoxEstimate = window.exists(_.latest.compareTo(overall.activeJamTime) < 0)
         )
         SkaterStatisticsRow(
           skater, overall, Map(before -> first, after -> second),

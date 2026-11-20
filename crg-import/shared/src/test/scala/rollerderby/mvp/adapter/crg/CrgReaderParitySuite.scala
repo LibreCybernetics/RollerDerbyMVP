@@ -112,7 +112,7 @@ class CrgReaderParitySuite extends munit.FunSuite:
     }
   }
 
-  test("both readers preserve team-local star-pass evidence, fieldings and verified penalty fields") {
+  test("both readers preserve CRG star-pass evidence and keep fixture timing outside the importer") {
     val gameKey = "ScoreBoard.Game(g)"
     val jamKey = s"$gameKey.Period(1).Jam(2)"
     val home = s"$jamKey.TeamJam(1)"
@@ -154,7 +154,7 @@ class CrgReaderParitySuite extends munit.FunSuite:
       assertEquals(passing.starPassTrip, Some(EntityReference.Resolved(ScoringTripKey(jam.key, Side.One, 2))))
       assertEquals(opposing.starPassTrip, None)
       assertEquals(passing.afterStarPassScore, Some(7))
-      assertEquals(passing.starPassElapsed.map(_.toMillis), Some(35000L))
+      assertEquals(passing.starPassElapsed, None)
       assertEquals(passing.fieldings.map(fielding => fielding.id.position -> fielding.notFielded), Vector(
         FieldingPosition.Blocker1 -> true, FieldingPosition.Blocker2 -> false, FieldingPosition.Blocker3 -> false
       ))
@@ -162,9 +162,9 @@ class CrgReaderParitySuite extends munit.FunSuite:
 
       val penalty = games.flatMap(_.sides).flatMap(_.penalties).headOption.getOrElse(fail("expected a penalty"))
       assertEquals(penalty.jam.flatMap(_.resolved), Some(jam.key))
-      assertEquals(penalty.occurredAtJamTime.map(_.toMillis), Some(25000L))
+      assertEquals(penalty.occurredAtJamTime, None)
       assertEquals(penalty.enteredAt.map(_.toEpochMilli), Some(200000L))
-      assertEquals(penalty.afterStarPass, Some(false))
+      assertEquals(penalty.afterStarPass, None)
 
       val opponentOnly = input.replace(tripId, s""""$home.ScoringTrip(2).Id":"own-trip"""").nn
       val unresolved = decode(opponentOnly).fold(error => fail(error), identity)

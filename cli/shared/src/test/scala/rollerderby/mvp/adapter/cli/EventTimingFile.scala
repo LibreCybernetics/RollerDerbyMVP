@@ -1,17 +1,28 @@
 package rollerderby.mvp.adapter.cli
 
-import rollerderby.mvp.application.{ImportError, ImportedGames, StarPassEvidence}
+import rollerderby.mvp.application.{GameSource, ImportError, ImportGamesService, ImportedGames, StarPassEvidence}
 import rollerderby.mvp.domain.*
 
 import java.time.Duration
 
-private object EventTimingFile:
+private[mvp] object EventTimingFile:
+  def source(original: GameSource, paths: Vector[String], text: String): Either[Vector[String], GameSource] =
+    apply(text, new ImportGamesService(original).inspect(paths)).map { imports =>
+      val games: Map[String, Either[String, Vector[Game]]] = imports.map {
+        case Right(imported) => imported.path -> Right(imported.games)
+        case Left(error)     => error.path -> Left(error.detail)
+      }.toMap
+      new GameSource:
+        def load(path: String): Either[String, Vector[Game]] =
+          games.getOrElse(path, Left("missing game fixture"))
+    }
+
   private case class Pass(jam: JamKey, side: Side, elapsed: Duration)
   private case class Infraction(jam: JamKey, key: PenaltyKey, elapsed: Option[Duration], afterPass: Option[Boolean])
   private case class Located[A](line: Int, event: A):
     def error(message: String): String = s"line $line: $message"
 
-  def apply(
+  private def apply(
       text: String,
       imports: Vector[Either[ImportError, ImportedGames]]
   ): Either[Vector[String], Vector[Either[ImportError, ImportedGames]]] =
@@ -68,7 +79,7 @@ private object EventTimingFile:
       val evidence = StarPassEvidence.forTeam(jam, team.copy(starPassElapsed = Some(event.elapsed)))
       Vector(
         Option.when(team.starPassElapsed.exists(_.compareTo(event.elapsed) != 0))(
-          "star-pass time conflicts with the embedded verified time"
+          "star-pass time conflicts with the existing verified time"
         ),
         Option.when(!StarPassEvidence.validPassTime(jam, event.elapsed))("star-pass time must be inside a jam with a recorded duration"),
         Option.when(evidence.status == StarPassEvidence.Status.Conflict)("star-pass timing conflicts with team pass evidence")
@@ -91,10 +102,10 @@ private object EventTimingFile:
       val marked = event.afterPass.orElse(penalty.afterStarPass)
       val conflicts = Vector(
         Option.when(event.elapsed.exists(time => penalty.occurredAtJamTime.exists(_.compareTo(time) != 0)))(
-          "penalty time conflicts with the embedded verified time"
+          "penalty time conflicts with the existing verified time"
         ),
         Option.when(event.afterPass.exists(order => penalty.afterStarPass.exists(_ != order)))(
-          "penalty order conflicts with the embedded verified order"
+          "penalty order conflicts with the existing verified order"
         )
       ).flatten
       val jamErrors = jams.flatMap { jam =>

@@ -30,7 +30,8 @@ final case class ParticipationTotals(
     penalties: Int = 0,
     penaltiesPartial: Boolean = false,
     pointsFor: PointTotal = PointTotal(),
-    pointsAgainst: PointTotal = PointTotal()
+    pointsAgainst: PointTotal = PointTotal(),
+    includesBoxEstimate: Boolean = false
 ):
   private[application] def +(other: ParticipationTotals): ParticipationTotals =
     ParticipationTotals(
@@ -40,7 +41,8 @@ final case class ParticipationTotals(
       penalties = penalties + other.penalties,
       penaltiesPartial = penaltiesPartial || other.penaltiesPartial,
       pointsFor = pointsFor + other.pointsFor,
-      pointsAgainst = pointsAgainst + other.pointsAgainst
+      pointsAgainst = pointsAgainst + other.pointsAgainst,
+      includesBoxEstimate = includesBoxEstimate || other.includesBoxEstimate
     )
 
 final case class SkaterStatisticsRow(
@@ -56,9 +58,9 @@ final case class SkaterStatisticsRow(
   def unattributedJamTime: Duration =
     roles.valuesIterator.foldLeft(overall.activeJamTime)((time, role) => time.minus(role.activeJamTime).nn)
 
-final case class StarPassCoverage(recorded: Int, verified: Int):
+final case class StarPassCoverage(recorded: Int, verified: Int, estimated: Int = 0):
   private[application] def +(other: StarPassCoverage): StarPassCoverage =
-    StarPassCoverage(recorded + other.recorded, verified + other.verified)
+    StarPassCoverage(recorded + other.recorded, verified + other.verified, estimated + other.estimated)
 
 final case class JamStatistics(
     key: JamKey,
@@ -86,7 +88,7 @@ final case class TournamentSkaterStatistics(
 )
 
 object SkaterStatistics:
-  def forGame(game: Game): GameSkaterStatistics =
+  def forGame(game: Game, useBoxTripEstimates: Boolean = false): GameSkaterStatistics =
     val skaters = game.sides.flatMap { side =>
       val sharedIds = side.listedSkaters.groupBy(_.skater.id).collect {
         case (id, entries) if entries.size > 1 => id
@@ -102,9 +104,14 @@ object SkaterStatistics:
       .distinctBy(_.key)
     val byJam = penalties.groupBy(_.jam.flatMap(_.resolved).filter(jamKeys.contains))
     val unassigned = byJam.getOrElse(None, Vector.empty)
+    val boxEndpoints =
+      if useBoxTripEstimates then game.sides.flatMap(BoxTripPassWindows.endpoints).groupBy(_.fielding.jam)
+      else Map.empty
 
     val jams = game.jams.map { jam =>
-      val report = JamParticipation.analyze(jam, skaters, byJam.getOrElse(Some(jam.key), Vector.empty))
+      val report = JamParticipation.analyze(
+        jam, skaters, byJam.getOrElse(Some(jam.key), Vector.empty), boxEndpoints.getOrElse(jam.key, Vector.empty)
+      )
       report.copy(rows = total(report.rows))
     }
 
@@ -123,12 +130,14 @@ object SkaterStatistics:
       Option.when(unassigned.nonEmpty)(s"${unassigned.size} penalties could not be assigned to a jam")
     GameSkaterStatistics(jams, total(roster ++ jams.flatMap(_.rows) ++ unassignedRows), warnings)
 
-  def forTournament(games: Vector[Game]): Either[Vector[String], TournamentSkaterStatistics] =
+  def forTournament(
+      games: Vector[Game], useBoxTripEstimates: Boolean = false
+  ): Either[Vector[String], TournamentSkaterStatistics] =
     val (uniqueGames, conflicts) = Tournament.deduplicateGames(games)
     if conflicts.nonEmpty then Left(conflicts)
     else
       val reports = uniqueGames.map { game =>
-        val report = forGame(game)
+        val report = forGame(game, useBoxTripEstimates)
         val localTeams = report.totals.collect {
           case row if isGameLocal(row.skater) => row.skater.teamName
         }.distinct.sorted

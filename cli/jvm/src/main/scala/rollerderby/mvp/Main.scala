@@ -6,13 +6,11 @@ import rollerderby.mvp.application.ImportGamesService
 
 object Main:
   def main(args: Array[String]): Unit =
-    val source = CrgFileGameSource()
     val command = new CommandLine(
-      new ImportGamesService(source),
+      new ImportGamesService(CrgFileGameSource()),
       println,
       Console.err.println,
-      LocalInputPaths.inputs.expand,
-      source.readText
+      LocalInputPaths.inputs.expand
     )
     val status = command.run(args.toVector)
     if status != 0 then sys.exit(status)

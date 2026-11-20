@@ -12,18 +12,17 @@ final class CommandLine(
     importGames: ImportGames,
     printOut: String => Unit,
     printError: String => Unit,
-    expandInput: String => Either[ImportError, Vector[String]] = path => Right(Vector(path)),
-    readTimingFile: String => Either[String, String] = _ => Left("timing-file reader unavailable")
+    expandInput: String => Either[ImportError, Vector[String]] = path => Right(Vector(path))
 ):
   private val statisticsUsage =
-    "roller-derby-mvp skater-stats [--by jam|game|tournament] [--event-timings <file>] <file-or-directory>..."
+    "roller-derby-mvp skater-stats [--by jam|game|tournament] [--box-trip-estimates] <file-or-directory>..."
   private val penaltyUsage = "roller-derby-mvp penalty-stats <file-or-directory>..."
   private val usage = s"Usage: roller-derby-mvp inspect <file>...\n       $statisticsUsage\n       $penaltyUsage"
   private val directoryHelp = "Directories contribute their immediate .json files in filename order."
   private val statisticsHelp = s"""Usage: $statisticsUsage
     |Report jams, active jam time, penalties and team scoring by skater and role. Default scope is game.
-    |Pack combines blockers and pivots. Verified star-pass timing splits active jam time between roles.
-    |--event-timings takes a UTF-8 TSV file with verified star-pass and penalty event timings.
+    |Pack combines blockers and pivots.
+    |--box-trip-estimates uses before- and after-pass box clocks for partial role time estimates.
     |Tournament scope combines all games in the supplied files.
     |$directoryHelp""".stripMargin
 
@@ -65,37 +64,26 @@ final class CommandLine(
       case None =>
         printError(s"Usage: $statisticsUsage")
         2
-      case Some((scope, timingFile, files)) =>
-        val imports = importStatistics(files)
-        val verified = timingFile.fold(Right(imports): Either[Vector[String], Vector[Either[ImportError, ImportedGames]]]) { path =>
-          readTimingFile(path).left.map(Vector(_)).flatMap(text => EventTimingFile(text, imports))
-            .left.map(_.map(error => s"$path: $error"))
+      case Some(("tournament", useBoxTripEstimates, files)) =>
+        reportTournament(importStatistics(files), useBoxTripEstimates) { statistics =>
+          printOut("Tournament totals")
+          printSkaterSections(sorted(statistics.totals).map(row => Vector.empty[String] -> row), showGameLocalIds = true)
+          printCoverage(statistics.coverage, statistics.totals, useBoxTripEstimates)
+          statistics.roleWarnings.foreach(printError)
         }
-        verified match
-          case Left(issues) =>
-            imports.flatMap(_.left.toOption).foreach(error => printError(s"${error.path}: ${error.detail}"))
-            issues.foreach(printError)
-            1
-          case Right(results) if scope == "tournament" =>
-            reportTournament(results) { statistics =>
-              printOut("Tournament totals")
-              printSkaterSections(sorted(statistics.totals).map(row => Vector.empty[String] -> row), showGameLocalIds = true)
-              printCoverage(statistics.coverage, statistics.totals)
-              statistics.roleWarnings.foreach(printError)
-            }
-          case Right(results) =>
-            reportGames(results)((path, game) => printGameStatistics(path, game, scope == "jam"))
+      case Some((scope, useBoxTripEstimates, files)) =>
+        reportGames(importStatistics(files))((path, game) => printGameStatistics(path, game, scope == "jam", useBoxTripEstimates))
 
   private def statisticsOptions(
       args: Vector[String],
       scope: Option[String] = None,
-      timings: Option[String] = None
-  ): Option[(String, Option[String], Vector[String])] = args match
+      useBoxTripEstimates: Boolean = false
+  ): Option[(String, Boolean, Vector[String])] = args match
     case "--by" +: (value @ ("jam" | "game" | "tournament")) +: rest if scope.isEmpty =>
-      statisticsOptions(rest, Some(value), timings)
-    case "--event-timings" +: file +: rest if timings.isEmpty && !file.startsWith("-") && file.nonEmpty =>
-      statisticsOptions(rest, scope, Some(file))
-    case paths => inputPaths(paths).map((scope.getOrElse("game"), timings, _))
+      statisticsOptions(rest, Some(value), useBoxTripEstimates)
+    case "--box-trip-estimates" +: rest if !useBoxTripEstimates =>
+      statisticsOptions(rest, scope, useBoxTripEstimates = true)
+    case paths => inputPaths(paths).map((scope.getOrElse("game"), useBoxTripEstimates, _))
 
   private def inputPaths(operands: Vector[String]): Option[Vector[String]] = operands match
     case "--" +: files if files.nonEmpty => Some(files)
@@ -116,8 +104,8 @@ final class CommandLine(
     }
     if results.exists(_.isLeft) then 1 else 0
 
-  private def printGameStatistics(path: String, game: Game, byJam: Boolean): Unit =
-    val statistics = SkaterStatistics.forGame(game)
+  private def printGameStatistics(path: String, game: Game, byJam: Boolean, useBoxTripEstimates: Boolean): Unit =
+    val statistics = SkaterStatistics.forGame(game, useBoxTripEstimates)
     printOut(s"$path: ${gameLabel(game.id, game.name)}")
     if byJam then
       val rows = statistics.jams.sortBy(jam => (jam.key.period.number, jam.key.number)).flatMap { jam =>
@@ -126,18 +114,19 @@ final class CommandLine(
       }
       printSkaterSections(rows, leadingColumns = Vector("Period", "Jam"))
     else printSkaterSections(sorted(statistics.totals).map(row => Vector.empty[String] -> row))
-    printCoverage(statistics.coverage, statistics.totals)
+    printCoverage(statistics.coverage, statistics.totals, useBoxTripEstimates)
     (statistics.warnings ++ statistics.roleWarnings).foreach(warning => printError(s"$path: game ${game.id.value}: $warning"))
 
   private def reportTournament(
-      results: Vector[Either[ImportError, ImportedGames]]
+      results: Vector[Either[ImportError, ImportedGames]],
+      useBoxTripEstimates: Boolean = false
   )(report: TournamentSkaterStatistics => Unit): Int =
     val errors = results.flatMap(_.left.toOption)
     if errors.nonEmpty then
       errors.foreach(error => printError(s"${error.path}: ${error.detail}"))
       1
     else
-      SkaterStatistics.forTournament(results.flatMap(_.toOption).flatMap(_.games)) match
+      SkaterStatistics.forTournament(results.flatMap(_.toOption).flatMap(_.games), useBoxTripEstimates) match
         case Left(issues) =>
           issues.foreach(printError)
           1
@@ -146,10 +135,13 @@ final class CommandLine(
           statistics.warnings.foreach(printError)
           0
 
-  private def printCoverage(coverage: StarPassCoverage, rows: Vector[SkaterStatisticsRow]): Unit =
+  private def printCoverage(
+      coverage: StarPassCoverage, rows: Vector[SkaterStatisticsRow], useBoxTripEstimates: Boolean
+  ): Unit =
     val time = rows.iterator.foldLeft(Duration.ZERO.nn)((sum, row) => sum.plus(row.unattributedJamTime).nn)
     val displayed = partial(duration(time), rows.exists(_.unattributedTimePartial))
-    printOut(s"Star-pass timing: ${coverage.verified} of ${coverage.recorded} team passes verified · $displayed unattributed skater time")
+    val estimates = if useBoxTripEstimates then s" · ${coverage.estimated} box-trip windows used" else ""
+    printOut(s"Star-pass timing: ${coverage.recorded} team passes recorded$estimates · $displayed unattributed skater time")
 
   private def printPenaltyStatistics(statistics: TournamentSkaterStatistics): Unit =
     val gameNoun = if statistics.games.size == 1 then "game" else "games"
@@ -232,7 +224,7 @@ final class CommandLine(
       else f"${count / minutes}%.2f"
     Vector(
       totals.jams.toString,
-      partial(duration(time), totals.timePartial),
+      if totals.includesBoxEstimate then s"${duration(time)} (partial, box estimate)" else partial(duration(time), totals.timePartial),
       partial(totals.penalties.toString, totals.penaltiesPartial),
       rate(totals.penalties, totals.penaltiesPartial),
       points(totals.pointsFor),
