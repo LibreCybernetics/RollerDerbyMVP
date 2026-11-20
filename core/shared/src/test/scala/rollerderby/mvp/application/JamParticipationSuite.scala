@@ -58,23 +58,25 @@ class JamParticipationSuite extends munit.FunSuite:
     val pack = forRole(row, SkaterJamRole.Pack)
     val jammer = forRole(row, SkaterJamRole.Jammer)
     assertEquals(report.roleWarnings, Vector.empty)
-    assertEquals((row.overall.penalties, pack.penalties, jammer.penalties, row.penaltiesWithoutRole), (5, 2, 2, 1))
-    assertEquals((row.overall.penaltiesPartial, pack.penaltiesPartial, jammer.penaltiesPartial), (false, true, true))
+    assertEquals((row.overall.penalties, pack.penalties, jammer.penalties), (5, 2, 2))
+    assertEquals((pack.maximumPenalties, jammer.maximumPenalties), (3, 3))
     assertEquals((row.overall.jams, pack.jams, jammer.jams), (1, 1, 1))
     assertEquals((row.overall.activeJamTime.toSeconds, pack.activeJamTime.toSeconds, jammer.activeJamTime.toSeconds,
-      row.unattributedJamTime.toSeconds), (60L, 30L, 30L, 0L))
+      row.uncertainRoleTime.toSeconds), (60L, 30L, 30L, 0L))
   }
 
-  test("contradictory and out-of-jam penalty timing remains unattributed with diagnostics") {
+  test("contradictory and out-of-jam penalty timing widens role bounds with diagnostics") {
     val (report, row) = analyze(penalties = Vector(
       penalty(1, 20, Some(false)),
       penalty(2, 40, Some(false)),
       penalty(3, -1),
       penalty(4, 61)
     ))
-    assertEquals((row.overall.penalties, row.penaltiesWithoutRole), (4, 3))
+    assertEquals(row.overall.penalties, 4)
     assertEquals(forRole(row, SkaterJamRole.Pack).penalties, 1)
     assertEquals(forRole(row, SkaterJamRole.Jammer).penalties, 0)
+    assertEquals(forRole(row, SkaterJamRole.Pack).maximumPenalties, 4)
+    assertEquals(forRole(row, SkaterJamRole.Jammer).maximumPenalties, 3)
     assertEquals(report.roleWarnings, Vector(
       "period 1, jam 1, side 1, skater pivot, penalty 2: verified penalty order conflicts with the pass and penalty times",
       "period 1, jam 1, side 1, skater pivot, penalty 3: verified penalty time is outside its jam",
@@ -82,7 +84,7 @@ class JamParticipationSuite extends munit.FunSuite:
     ))
   }
 
-  test("a scoring trip crossing the pass makes both role subtotals partial and retains attributable points") {
+  test("a scoring trip crossing the pass widens both role totals") {
     val (_, row) = analyze(opposingTrips = Vector(
       trip(1, 0, 20, Some(2)),
       trip(2, 20, 40, Some(3)),
@@ -91,8 +93,8 @@ class JamParticipationSuite extends munit.FunSuite:
     val pack = forRole(row, SkaterJamRole.Pack)
     val jammer = forRole(row, SkaterJamRole.Jammer)
     assertEquals(row.overall.pointsAgainst, PointTotal(9))
-    assertEquals(pack.pointsAgainst, PointTotal(2, partial = true))
-    assertEquals(jammer.pointsAgainst, PointTotal(4, partial = true))
+    assertEquals(pack.pointsAgainst, PointTotal(2, spread = 3))
+    assertEquals(jammer.pointsAgainst, PointTotal(4, spread = 3))
     assertEquals((pack.pointsFor, jammer.pointsFor), (PointTotal(2), PointTotal(2)))
   }
 
@@ -101,8 +103,19 @@ class JamParticipationSuite extends munit.FunSuite:
       trip(1, 0, 30, Some(3)),
       trip(2, 30, 60, Some(4))
     ), opposingScore = 7)
-    assertEquals(forRole(row, SkaterJamRole.Pack).pointsAgainst, PointTotal(0, partial = true))
-    assertEquals(forRole(row, SkaterJamRole.Jammer).pointsAgainst, PointTotal(4, partial = true))
+    assertEquals(forRole(row, SkaterJamRole.Pack).pointsAgainst, PointTotal(0, spread = 3))
+    assertEquals(forRole(row, SkaterJamRole.Jammer).pointsAgainst, PointTotal(4, spread = 3))
+  }
+
+  test("ambiguous signed scores widen the range even when they cancel in the jam total") {
+    val (_, row) = analyze(opposingTrips = Vector(
+      trip(1, 20, 40, Some(3)),
+      trip(2, 20, 40, Some(-3))
+    ))
+    assertEquals(row.overall.pointsAgainst, PointTotal())
+    row.roles.valuesIterator.foreach { role =>
+      assertEquals((role.pointsAgainst.minimum, role.pointsAgainst.maximum), (-3L, 3L))
+    }
   }
 
   test("incomplete or unreconciled trip scores leave role points partial and retain the official jam score") {
@@ -132,18 +145,19 @@ class JamParticipationSuite extends munit.FunSuite:
     assertEquals(report.coverage.verified, 0)
     val pack = forRole(estimated, SkaterJamRole.Pack)
     val jammer = forRole(estimated, SkaterJamRole.Jammer)
-    assertEquals((pack.activeJamTime.getSeconds, jammer.activeJamTime.getSeconds, estimated.unattributedJamTime.getSeconds),
+    assertEquals((pack.activeJamTime.getSeconds, jammer.activeJamTime.getSeconds, estimated.uncertainRoleTime.getSeconds),
       (20L, 15L, 25L))
-    assert(pack.timePartial && pack.includesBoxEstimate && jammer.timePartial && jammer.includesBoxEstimate)
-    assertEquals(estimated.penaltiesWithoutRole, 1)
+    assertEquals((pack.maximumJamTime.getSeconds, jammer.maximumJamTime.getSeconds), (45L, 40L))
+    assert(!pack.timePartial && pack.includesBoxEstimate && !jammer.timePartial && jammer.includesBoxEstimate)
+    assertEquals((pack.maximumPenalties, jammer.maximumPenalties), (1, 1))
 
     val (verifiedReport, verified) = analyze(boxEndpoints = endpoints)
     assertEquals(verifiedReport.coverage.estimated, 0)
-    assertEquals(verified.unattributedJamTime.getSeconds, 0L)
+    assertEquals(verified.uncertainRoleTime.getSeconds, 0L)
     assertEquals(forRole(verified, SkaterJamRole.Pack).activeJamTime.getSeconds, 30L)
     assert(!forRole(verified, SkaterJamRole.Pack).includesBoxEstimate)
 
     val (conflictReport, conflict) = analyze(elapsed = None, boxEndpoints = endpoints :+ endpoint(Side.One, 50, false))
     assertEquals(conflictReport.coverage.estimated, 0)
-    assertEquals(conflict.unattributedJamTime.getSeconds, 60L)
+    assertEquals(conflict.uncertainRoleTime.getSeconds, 60L)
   }

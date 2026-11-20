@@ -31,21 +31,20 @@ class DirectoryInputSuite extends munit.FunSuite:
     val stats = run(tournament, sampleDirectory)
     assertEquals(stats.status, 0)
     assertEquals(stats, run(tournament, files*))
-    assertEquals(stats.out.lastOption, Some("Star-pass timing: 178 team passes recorded · 470m21s unattributed skater time"))
+    assertEquals(stats.out.lastOption, Some("Star-pass timing: 178 team passes recorded · 470m21s uncertain skater time"))
     val rows = SkaterStatisticsOutput.rows(stats.out)
-    val (overall, byRole) = rows.partition(_.lift(2).contains("All roles"))
-    def penaltiesIn(rows: Vector[Vector[String]]): Int =
-      rows.flatMap(_.lift(5)).map(_.takeWhile(_.isDigit).toInt).sum
-    val withoutRole = penaltiesIn(byRole.filter(_.lift(2).contains("Unattributed")))
-    assertEquals(penaltiesIn(overall), 1000)
-    assert(withoutRole > 0)
-    assertEquals(penaltiesIn(byRole), 1000)
+    val overall = rows.filter(_.lift(2).contains("All roles"))
+    assertEquals(overall.flatMap(_.lift(5)).map(_.toInt).sum, 1000)
 
-    val duration = """(\d+)m(\d{2})(?:\.(\d{3}))?s""".r
-    def millis(cell: String): Long = cell.stripSuffix(" (partial)") match
+    val duration = """(\d+)m(\d{2})(?:\.(\d+))?s""".r
+    def seconds(cell: String): BigDecimal = cell match
       case duration(minutes, seconds, fraction) =>
-        minutes.nn.toLong * 60000 + seconds.nn.toLong * 1000 + Option(fraction).fold(0L)(_.toLong)
+        BigDecimal(minutes.nn) * 60 + BigDecimal(seconds.nn) + Option(fraction).fold(BigDecimal(0))(digits => BigDecimal(s"0.$digits"))
       case value => fail(s"Unexpected duration '$value'")
+    def bounds(cell: String, parse: String => BigDecimal): (BigDecimal, BigDecimal) =
+      cell.stripSuffix(" (partial)") match
+        case s"$midpoint ± $radius" => (parse(midpoint) - parse(radius), parse(midpoint) + parse(radius))
+        case exact => (parse(exact), parse(exact))
     val starts = rows.indices.filter(index => rows.lift(index).flatMap(_.lift(2)).contains("All roles"))
     assertEquals(starts.size, 149)
     starts.zip(starts.drop(1) :+ rows.size).foreach { case (start, end) =>
@@ -55,11 +54,15 @@ class DirectoryInputSuite extends munit.FunSuite:
       def cell(row: Vector[String], column: Int): String =
         row.lift(column).getOrElse(fail(s"Missing column $column for $clue"))
       val breakdown = group.drop(1)
-      assertEquals(millis(cell(total, 4)), breakdown.map(row => millis(cell(row, 4))).sum, clue)
-      assertEquals(penaltiesIn(group.take(1)), penaltiesIn(breakdown), clue)
-      def knownPoints(value: String): Int = value.stripSuffix(" (partial)").toInt
-      for column <- Vector(7, 8) do
-        assertEquals(knownPoints(cell(total, column)), breakdown.map(row => knownPoints(cell(row, column))).sum, clue)
+      assertEquals(breakdown.flatMap(_.lift(2)), Vector("Pack", "Jammer"), clue)
+      for column <- Vector(4, 5, 7, 8) do
+        val cells = breakdown.map(cell(_, column))
+        def parse(value: String): BigDecimal = if column == 4 then seconds(value) else BigDecimal(value)
+        if column == 4 || column == 5 || !cells.exists(_.endsWith(" (partial)")) then
+          val (totalValue, _) = bounds(cell(total, column), parse)
+          val limits = cells.map(bounds(_, parse))
+          assertEquals(limits.map(_._1).zip(limits.reverse.map(_._2)).map(_ + _),
+            Vector(totalValue, totalValue), s"$clue · column $column")
     }
   }
 

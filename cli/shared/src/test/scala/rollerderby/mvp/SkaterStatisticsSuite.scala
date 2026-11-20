@@ -84,10 +84,12 @@ class SkaterStatisticsSuite extends munit.FunSuite:
       Vector("Coyotes", "Puma", "1", "0m00s"),
       Vector("Coyotes", "#17 Águila", "3", "0m40s (partial)")
     ))
-    val unattributed = totals.table.find(row => row.lift(1).contains("#17 Águila") && row.lift(2).contains("Unattributed"))
-    assertEquals(unattributed.map(_.drop(3)), Some(Vector(
-      "—", "0m23.500s", "3 (2 without jam)", "—", "0 (partial)", "0 (partial)", "—", "—"
-    )))
+    val roles = totals.table.filter(_.lift(1).contains("#17 Águila")).drop(1)
+    assertEquals(roles.map(_.slice(2, 6)), Vector(
+      Vector("Pack", "0", "0m11.750s ± 0m11.750s", "1.5 ± 1.5"),
+      Vector("Jammer", "2", "0m28.250s ± 0m11.750s (partial)", "1.5 ± 1.5")
+    ))
+    assert(totals.lines.lastOption.exists(_.endsWith("2 penalties without jam")))
     assertEquals(totals.table.filter(_.lift(1).contains("Iguana")).flatMap(_.lift(2)), Vector("All roles", "Pack", "Jammer"))
     val overall = totals.table.filter(_.lift(2).contains("All roles"))
     assertEquals(overall.flatMap(_.lift(6)), Vector("—", "—", "—"))
@@ -269,11 +271,8 @@ class SkaterStatisticsSuite extends munit.FunSuite:
     )))
     assertEquals(jamMetrics("1", "Original jammer", "Pack").map(_.take(2)), Some(Vector("1", "0m55s")))
     assertEquals(jamMetrics("1", "Original jammer", "Jammer").map(_.take(2)), Some(Vector("1", "0m35s")))
-    assertEquals(jamMetrics("2", "Pivot", "Unattributed"), Some(Vector(
-      "—", "0m30s", "1", "—", "0", "0 (partial)", "—", "—"
-    )))
     assertEquals(jamMetrics("2", "Pivot", "Jammer"), Some(Vector(
-      "1", "0m00s (partial)", "1 (partial)", "—", "4", "0 (partial)", "—", "—"
+      "1", "0m15s ± 0m15s", "1.5 ± 0.5", "—", "4", "0 (partial)", "—", "—"
     )))
 
     val totals = run(source, "roles.json")
@@ -283,8 +282,8 @@ class SkaterStatisticsSuite extends munit.FunSuite:
     )))
     val pivot = totals.table.find(row => row.lift(1).contains("Pivot") && row.lift(2).contains("All roles"))
     assertEquals(pivot.map(_.drop(3).take(4)), Some(Vector("2", "2m00s", "4", "2.00")))
-    val unattributed = totals.table.find(row => row.lift(1).contains("Pivot") && row.lift(2).contains("Unattributed"))
-    assertEquals(unattributed.map(_.drop(3)), Some(Vector("—", "0m30s", "1", "—", "0", "0 (partial)", "—", "—")))
+    val pack = totals.table.find(row => row.lift(1).contains("Pivot") && row.lift(2).contains("Pack"))
+    assertEquals(pack.map(_.slice(3, 7)), Some(Vector("2", "0m50s ± 0m15s", "1.5 ± 0.5", "2.175 ± 1.255")))
   }
 
   private lazy val timingGameFields: Vector[(String, String)] =
@@ -312,7 +311,7 @@ class SkaterStatisticsSuite extends munit.FunSuite:
       "Team(2).Skater(p2).Penalty(1).Jam" -> "\"two\""
     )
 
-  test("the report prints each team and numbered skater once, with an indented Unattributed row when needed") {
+  test("the report prints each team and numbered skater once, with three rows per skater") {
     val fields = timingGameFields.filterNot(_._1 == "Team(1).Skater(p1).Name") ++ Vector(
       "Team(1).FullName" -> "\"Coyotes\"",
       "Team(2).FullName" -> "\"Owls\"",
@@ -326,13 +325,13 @@ class SkaterStatisticsSuite extends munit.FunSuite:
     assertEquals(report.lines.count(_.contains("#17 Águila")), 1)
     assertEquals(report.lines.count(_.contains("Coyotes")), 1)
     assertEquals(report.lines.count(_.contains("Owls")), 1)
-    val group = report.lines.dropWhile(line => !line.startsWith("#17 Águila")).take(4)
-    assertEquals(group.size, 4)
+    val group = report.lines.dropWhile(line => !line.startsWith("#17 Águila")).take(3)
+    assertEquals(group.size, 3)
     assert(group.drop(1).forall(_.startsWith(" ")))
     val roles = report.table.filter(_.lift(1).contains("#17 Águila")).flatMap(_.lift(2))
-    assertEquals(roles, Vector("All roles", "Pack", "Jammer", "Unattributed"))
+    assertEquals(roles, Vector("All roles", "Pack", "Jammer"))
     assert(!report.lines.exists(line =>
-      Vector("Unassigned penalties", "Penalties without role", "Unattributed jam time").exists(line.contains)
+      Vector("Unassigned penalties", "Penalties without role", "Unattributed").exists(line.contains)
     ))
   }
 
@@ -349,7 +348,7 @@ class SkaterStatisticsSuite extends munit.FunSuite:
     val report = run(timingSource(source, timing), "--by", "jam", "game.json")
     assertEquals(report.status, 0)
     assertEquals(report.errors, Vector.empty)
-    assertEquals(report.lines.lastOption, Some("Star-pass timing: 3 team passes recorded · 0m00s unattributed skater time"))
+    assertEquals(report.lines.lastOption, Some("Star-pass timing: 3 team passes recorded · 0m00s uncertain skater time"))
     def row(jam: String, skater: String, role: String): Option[Vector[String]] =
       report.table.find(cells => cells.lift(1).contains(jam) && cells.lift(3).contains(skater) && cells.lift(4).contains(role))
         .map(_.slice(5, 8))
@@ -364,7 +363,7 @@ class SkaterStatisticsSuite extends munit.FunSuite:
     assertEquals(row("2", "p2", "Jammer"), Some(Vector("1", "0m20s", "0")))
 
     val withoutTimings = run(source, "--by", "jam", "game.json")
-    assertEquals(withoutTimings.lines.lastOption, Some("Star-pass timing: 3 team passes recorded · 9m00s unattributed skater time"))
+    assertEquals(withoutTimings.lines.lastOption, Some("Star-pass timing: 3 team passes recorded · 9m00s uncertain skater time"))
   }
 
   test("video fixture timing is absent from public help and the former option is rejected") {
@@ -422,7 +421,7 @@ class SkaterStatisticsSuite extends munit.FunSuite:
     assertEquals(valid.errors, Vector.empty)
     val pivot = valid.table.filter(row => row.lift(1).contains("1") && row.lift(3).contains("p1"))
     assertEquals(pivot.flatMap(row => row.lift(4).zip(row.lift(7))),
-      Vector("All roles" -> "2", "Pack" -> "1", "Jammer" -> "1", "Unattributed" -> "0"))
+      Vector("All roles" -> "2", "Pack" -> "1", "Jammer" -> "1"))
 
     Vector("before", "after").foreach { marker =>
       val invalid = s"$verifiedPass\npenalty\tg\t1\t1\t2\tp2\t2\t-\t$marker"
@@ -459,7 +458,7 @@ class SkaterStatisticsSuite extends munit.FunSuite:
       Vector("line 1: penalty occurrence time must be within its jam's recorded duration"))
   }
 
-  test("partial role penalty and scoring totals display a dash for their per-minute rates") {
+  test("bounded role penalties and points produce rate ranges and missing scores stay partial") {
     val fields = Vector(
       "Period(1).Jam(1).TeamJam(1).JamScore" -> "4",
       "Period(1).Jam(1).TeamJam(1).AfterSPScore" -> "2",
@@ -476,14 +475,13 @@ class SkaterStatisticsSuite extends munit.FunSuite:
     val pivot = report.table.filter(row => row.lift(1).contains("1") && row.lift(3).contains("p1"))
     assertEquals(pivot.flatMap(row => row.lift(4).map(_ -> row.slice(7, 13))), Vector(
       "All roles" -> Vector("1", "0.67", "4", "9", "2.67", "6.00"),
-      "Pack" -> Vector("0 (partial)", "—", "2", "2 (partial)", "4.00", "—"),
-      "Jammer" -> Vector("0 (partial)", "—", "2", "4 (partial)", "2.00", "—"),
-      "Unattributed" -> Vector("1", "—", "0", "3", "—", "—")
+      "Pack" -> Vector("0.5 ± 0.5", "1.00 ± 1.00", "2", "3.5 ± 1.5", "4.00", "7.00 ± 3.00"),
+      "Jammer" -> Vector("0.5 ± 0.5", "0.50 ± 0.50", "2", "5.5 ± 1.5", "2.00", "5.50 ± 1.50")
     ))
     val game = run(source, "game.json")
     assertEquals(game.status, 0)
-    val unattributed = game.table.find(row => row.lift(1).contains("p1") && row.lift(2).contains("Unattributed"))
-    assertEquals(unattributed.map(_.slice(7, 9)), Some(Vector("0 (partial)", "3 (partial)")))
+    val pack = game.table.find(row => row.lift(1).contains("p1") && row.lift(2).contains("Pack"))
+    assertEquals(pack.map(_.slice(7, 11)), Some(Vector("2 (partial)", "3.5 ± 1.5 (partial)", "—", "—")))
   }
 
   test("conflicting team-specific pass evidence leaves only the affected team's switch uncertain") {
@@ -497,8 +495,8 @@ class SkaterStatisticsSuite extends munit.FunSuite:
     assertEquals(report.errors, Vector("game.json: game g: period 1, jam 1, side 1: team StarPass is false but team evidence records a pass"))
     val rows = report.table.filter(_.lift(1).contains("1"))
     val pivot = rows.filter(_.lift(3).contains("p1"))
-    assertEquals(pivot.flatMap(_.lift(4)), Vector("All roles", "Pack", "Jammer", "Unattributed"))
-    assertEquals(pivot.flatMap(_.lift(6)), Vector("1m30s", "0m00s (partial)", "0m00s (partial)", "1m30s"))
+    assertEquals(pivot.flatMap(_.lift(4)), Vector("All roles", "Pack", "Jammer"))
+    assertEquals(pivot.flatMap(_.lift(6)), Vector("1m30s", "0m45s ± 0m45s", "0m45s ± 0m45s"))
     assert(rows.exists(row => row.lift(3).contains("p2") && row.lift(4).contains("Pack") &&
       row.lift(6).contains("1m30s")))
   }

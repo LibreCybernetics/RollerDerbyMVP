@@ -44,8 +44,7 @@ private object JamParticipation:
         SkaterStatisticsRow(
           skater,
           overall = ParticipationTotals(penalties = entries.size),
-          roles = incompleteRoles(ParticipationTotals(penaltiesPartial = true)),
-          penaltiesWithoutRole = entries.size
+          roles = uncertainRoles(ParticipationTotals(possibleAdditionalPenalties = entries.size))
         )
       )
     }
@@ -122,52 +121,47 @@ private object JamParticipation:
       case Timeline.Unknown =>
         SkaterStatisticsRow(
           skater, overall,
-          roles = incompleteRoles(ParticipationTotals(
-            timePartial = true,
-            penaltiesPartial = penalties.nonEmpty,
-            pointsFor = PointTotal(partial = true),
-            pointsAgainst = PointTotal(partial = true)
-          )),
-          unattributedTimePartial = overall.timePartial,
-          penaltiesWithoutRole = penalties.size,
-          unattributedPointsFor = overall.pointsFor,
-          unattributedPointsAgainst = overall.pointsAgainst
+          roles = uncertainRoles(ParticipationTotals(
+            timePartial = overall.timePartial,
+            timeSpread = overall.activeJamTime,
+            possibleAdditionalPenalties = penalties.size,
+            pointsFor = pointsByTime(Some(team), duration, None)._1,
+            pointsAgainst = pointsByTime(opponent, duration, None)._1
+          ))
         )
       case Timeline.StarPass(before, after, elapsed, window) =>
         val penaltyOrder = penalties.map(penalty => penaltyAfterPass(penalty, duration, elapsed))
         val unknownPenalties = penaltyOrder.count(_.isEmpty)
         val (forBefore, forAfter) = ownPoints(team).getOrElse(pointsByTime(Some(team), duration, elapsed))
         val (againstBefore, againstAfter) = pointsByTime(opponent, duration, elapsed)
+        val earliest = elapsed.orElse(window.map(_.earliest)).getOrElse(Duration.ZERO.nn)
+        val latest = elapsed.orElse(window.map(_.latest)).getOrElse(overall.activeJamTime)
+        val spread = latest.minus(earliest).nn
         val first = ParticipationTotals(
           jams = 1,
-          activeJamTime = elapsed.orElse(window.map(_.earliest)).getOrElse(Duration.ZERO.nn),
-          timePartial = elapsed.isEmpty,
+          activeJamTime = earliest,
+          timePartial = overall.timePartial,
           penalties = penaltyOrder.count(_.contains(false)),
-          penaltiesPartial = unknownPenalties > 0,
+          possibleAdditionalPenalties = unknownPenalties,
           pointsFor = forBefore,
           pointsAgainst = againstBefore,
-          includesBoxEstimate = window.exists(estimate => !estimate.earliest.isZero)
+          includesBoxEstimate = window.isDefined,
+          timeSpread = spread
         )
         val second = ParticipationTotals(
           jams = 1,
-          activeJamTime = elapsed.orElse(window.map(_.latest))
-            .fold(Duration.ZERO.nn)(time => overall.activeJamTime.minus(time).nn),
-          timePartial = elapsed.isEmpty,
+          activeJamTime = overall.activeJamTime.minus(latest).nn,
+          timePartial = overall.timePartial,
           penalties = penaltyOrder.count(_.contains(true)),
-          penaltiesPartial = unknownPenalties > 0,
+          possibleAdditionalPenalties = unknownPenalties,
           pointsFor = forAfter,
           pointsAgainst = againstAfter,
-          includesBoxEstimate = window.exists(_.latest.compareTo(overall.activeJamTime) < 0)
+          includesBoxEstimate = window.isDefined,
+          timeSpread = spread
         )
-        SkaterStatisticsRow(
-          skater, overall, Map(before -> first, after -> second),
-          unattributedTimePartial = elapsed.isEmpty && overall.timePartial,
-          penaltiesWithoutRole = unknownPenalties,
-          unattributedPointsFor = overall.pointsFor.remaining(forBefore, forAfter),
-          unattributedPointsAgainst = overall.pointsAgainst.remaining(againstBefore, againstAfter)
-        )
+        SkaterStatisticsRow(skater, overall, Map(before -> first, after -> second))
 
-  def incompleteRoles(totals: ParticipationTotals): Map[SkaterJamRole, ParticipationTotals] =
+  def uncertainRoles(totals: ParticipationTotals): Map[SkaterJamRole, ParticipationTotals] =
     Map(Pack -> totals, Jammer -> totals)
 
   private def penaltyAfterPass(
@@ -204,19 +198,26 @@ private object JamParticipation:
       duration: Option[Duration],
       elapsed: Option[Duration]
   ): (PointTotal, PointTotal) =
-    val split = for
+    val totals = for
       side <- team
       score <- side.score
-      if side.trips.forall(_.score.isDefined) && side.trips.flatMap(_.score).sum == score
     yield
-      val scored = side.trips.filter(_.score.exists(_ != 0))
-      val byOrder = scored.groupBy(trip => tripAfterPass(trip, duration, elapsed))
-      val partial = byOrder.contains(None)
-      (
-        PointTotal(byOrder.getOrElse(Some(false), Vector.empty).flatMap(_.score).sum, partial),
-        PointTotal(byOrder.getOrElse(Some(true), Vector.empty).flatMap(_.score).sum, partial)
-      )
-    split.getOrElse((PointTotal(partial = true), PointTotal(partial = true)))
+      val scores = side.trips.flatMap(trip => trip.score.map(value => trip -> value.toLong))
+      if side.trips.isEmpty then
+        val uncertain = PointTotal.uncertain(score.toLong)
+        (uncertain, uncertain)
+      else if scores.size != side.trips.size || scores.map(_._2).sum != score.toLong then
+        (PointTotal(partial = true), PointTotal(partial = true))
+      else
+        scores.foldLeft((PointTotal(), PointTotal())) { case ((before, after), (trip, value)) =>
+          tripAfterPass(trip, duration, elapsed) match
+            case Some(false) => (before + PointTotal(value), after)
+            case Some(true) => (before, after + PointTotal(value))
+            case None =>
+              val uncertain = PointTotal.uncertain(value)
+              (before + uncertain, after + uncertain)
+        }
+    totals.getOrElse((PointTotal(partial = true), PointTotal(partial = true)))
 
   private def tripAfterPass(
       trip: ScoringTrip,

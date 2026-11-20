@@ -138,10 +138,11 @@ final class CommandLine(
   private def printCoverage(
       coverage: StarPassCoverage, rows: Vector[SkaterStatisticsRow], useBoxTripEstimates: Boolean
   ): Unit =
-    val time = rows.iterator.foldLeft(Duration.ZERO.nn)((sum, row) => sum.plus(row.unattributedJamTime).nn)
-    val displayed = partial(duration(time), rows.exists(_.unattributedTimePartial))
+    val time = rows.iterator.foldLeft(Duration.ZERO.nn)((sum, row) => sum.plus(row.uncertainRoleTime).nn)
     val estimates = if useBoxTripEstimates then s" · ${coverage.estimated} box-trip windows used" else ""
-    printOut(s"Star-pass timing: ${coverage.recorded} team passes recorded$estimates · $displayed unattributed skater time")
+    val unassigned = rows.iterator.map(_.unassignedPenalties).sum
+    val withoutJam = if unassigned > 0 then s" · $unassigned penalties without jam" else ""
+    printOut(s"Star-pass timing: ${coverage.recorded} team passes recorded$estimates · ${duration(time)} uncertain skater time$withoutJam")
 
   private def printPenaltyStatistics(statistics: TournamentSkaterStatistics): Unit =
     val gameNoun = if statistics.games.size == 1 then "game" else "games"
@@ -209,47 +210,61 @@ final class CommandLine(
       val totals = row.roles.getOrElse(role, ParticipationTotals())
       indent ++ Vector(role.toString) ++ metrics(totals)
     }
-    val time = row.unattributedJamTime
-    val forPoints = row.unattributedPointsFor
-    val againstPoints = row.unattributedPointsAgainst
-    val unattributed = Option.when(
-      !time.isZero || row.unattributedTimePartial || row.penaltiesWithoutRole > 0 ||
-        forPoints.known != 0 || forPoints.partial || againstPoints.known != 0 || againstPoints.partial
-    ) {
-      val penalties = row.penaltiesWithoutRole.toString
-      val penaltyCell =
-        if row.unassignedPenalties > 0 then s"$penalties (${row.unassignedPenalties} without jam)" else penalties
-      indent ++ Vector(
-        "Unattributed", "—", partial(duration(time), row.unattributedTimePartial), penaltyCell, "—",
-        points(forPoints), points(againstPoints), "—", "—"
-      )
-    }
-    (overall +: roles) ++ unattributed
+    overall +: roles
 
   private def metrics(totals: ParticipationTotals): Vector[String] =
-    val time = totals.activeJamTime
-    val minutes = (time.getSeconds.toDouble + time.getNano / 1e9) / 60.0
-    def rate(count: Int, incomplete: Boolean): String =
-      if minutes <= 0 || totals.timePartial || incomplete then "—"
-      else f"${count / minutes}%.2f"
+    def seconds(time: Duration): BigDecimal =
+      BigDecimal(time.getSeconds) + BigDecimal(time.getNano, 9)
+    val minSeconds = seconds(totals.activeJamTime)
+    val maxSeconds = seconds(totals.maximumJamTime)
+    def rate(minimum: Long, maximum: Long, incomplete: Boolean = false): String =
+      import BigDecimal.RoundingMode.{CEILING, FLOOR, HALF_UP}
+      if minSeconds <= 0 || totals.timePartial || incomplete then "—"
+      else if minimum == maximum && (minSeconds == maxSeconds || minimum == 0) then
+        decimal((BigDecimal(minimum) * 60 / minSeconds).setScale(2, HALF_UP))
+      else
+        val lower = BigDecimal(minimum) * 60 / (if minimum < 0 then minSeconds else maxSeconds)
+        val upper = BigDecimal(maximum) * 60 / (if maximum < 0 then maxSeconds else minSeconds)
+        decimalRange(lower.setScale(2, FLOOR), upper.setScale(2, CEILING))
+    val halfTime = totals.timeSpread.dividedBy(2).nn
+    val timeCell =
+      if totals.timeSpread.isZero then duration(totals.activeJamTime)
+      else
+        val midpoint = totals.activeJamTime.plus(halfTime).nn
+        val radius = totals.timeSpread.minus(halfTime).nn
+        s"${duration(midpoint)} ± ${duration(radius)}"
+    val time = partial(timeCell, totals.timePartial)
     Vector(
       totals.jams.toString,
-      if totals.includesBoxEstimate then s"${duration(time)} (partial, box estimate)" else partial(duration(time), totals.timePartial),
-      partial(totals.penalties.toString, totals.penaltiesPartial),
-      rate(totals.penalties, totals.penaltiesPartial),
+      if totals.includesBoxEstimate then s"$time (box estimate)" else time,
+      decimalRange(BigDecimal(totals.penalties), BigDecimal(totals.maximumPenalties)),
+      rate(totals.penalties, totals.maximumPenalties),
       points(totals.pointsFor),
       points(totals.pointsAgainst),
-      rate(totals.pointsFor.known, totals.pointsFor.partial),
-      rate(totals.pointsAgainst.known, totals.pointsAgainst.partial)
+      rate(totals.pointsFor.minimum, totals.pointsFor.maximum, totals.pointsFor.partial),
+      rate(totals.pointsAgainst.minimum, totals.pointsAgainst.maximum, totals.pointsAgainst.partial)
     )
 
-  private def points(total: PointTotal): String = partial(total.known.toString, total.partial)
+  private def decimal(value: BigDecimal): String = value.bigDecimal.toPlainString.nn
+
+  private def decimalRange(minimum: BigDecimal, maximum: BigDecimal): String =
+    if minimum == maximum then decimal(minimum)
+    else
+      val midpoint = (minimum + maximum) / 2
+      val radius = (maximum - minimum) / 2
+      s"${decimal(midpoint)} ± ${decimal(radius)}"
+
+  private def points(total: PointTotal): String =
+    partial(decimalRange(BigDecimal(total.minimum), BigDecimal(total.maximum)), total.partial)
 
   private def duration(value: Duration): String =
     val seconds = value.getSeconds
     val whole = f"${seconds / 60}%dm${seconds % 60}%02d"
-    val millis = value.getNano / 1000000
-    if millis == 0 then s"${whole}s" else f"$whole.$millis%03ds"
+    val nanos = value.getNano
+    if nanos == 0 then s"${whole}s"
+    else
+      val fraction = f"$nanos%09d".reverse.dropWhile(_ == '0').reverse.padTo(3, '0')
+      s"$whole.${fraction}s"
 
   private def partial(value: String, incomplete: Boolean): String =
     if incomplete then s"$value (partial)" else value

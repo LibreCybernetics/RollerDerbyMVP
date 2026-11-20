@@ -15,53 +15,55 @@ final case class StatisticSkater(
 enum SkaterJamRole derives CanEqual:
   case Pack, Jammer
 
-final case class PointTotal(known: Int = 0, partial: Boolean = false):
-  private[application] def +(other: PointTotal): PointTotal =
-    PointTotal(known + other.known, partial || other.partial)
+final case class PointTotal(minimum: Long = 0, partial: Boolean = false, spread: Long = 0):
+  def maximum: Long = minimum + spread
 
-  private[application] def remaining(before: PointTotal, after: PointTotal): PointTotal =
-    copy(known = known - before.known - after.known)
+  private[application] def +(other: PointTotal): PointTotal =
+    PointTotal(minimum + other.minimum, partial || other.partial, spread + other.spread)
 
 object PointTotal:
   private[application] def from(score: Option[Int]): PointTotal =
     PointTotal(score.getOrElse(0), score.isEmpty)
+
+  private[application] def uncertain(score: Long): PointTotal =
+    PointTotal(math.min(0, score), spread = math.abs(score))
 
 final case class ParticipationTotals(
     jams: Int = 0,
     activeJamTime: Duration = Duration.ZERO.nn,
     timePartial: Boolean = false,
     penalties: Int = 0,
-    penaltiesPartial: Boolean = false,
+    possibleAdditionalPenalties: Int = 0,
     pointsFor: PointTotal = PointTotal(),
     pointsAgainst: PointTotal = PointTotal(),
-    includesBoxEstimate: Boolean = false
+    includesBoxEstimate: Boolean = false,
+    timeSpread: Duration = Duration.ZERO.nn
 ):
+  def maximumJamTime: Duration = activeJamTime.plus(timeSpread).nn
+  def maximumPenalties: Int = penalties + possibleAdditionalPenalties
+
   private[application] def +(other: ParticipationTotals): ParticipationTotals =
     ParticipationTotals(
       jams = jams + other.jams,
       activeJamTime = activeJamTime.plus(other.activeJamTime).nn,
       timePartial = timePartial || other.timePartial,
       penalties = penalties + other.penalties,
-      penaltiesPartial = penaltiesPartial || other.penaltiesPartial,
+      possibleAdditionalPenalties = possibleAdditionalPenalties + other.possibleAdditionalPenalties,
       pointsFor = pointsFor + other.pointsFor,
       pointsAgainst = pointsAgainst + other.pointsAgainst,
-      includesBoxEstimate = includesBoxEstimate || other.includesBoxEstimate
+      includesBoxEstimate = includesBoxEstimate || other.includesBoxEstimate,
+      timeSpread = timeSpread.plus(other.timeSpread).nn
     )
 
 final case class SkaterStatisticsRow(
     skater: StatisticSkater,
     overall: ParticipationTotals = ParticipationTotals(),
     roles: Map[SkaterJamRole, ParticipationTotals] = Map.empty,
-    unattributedTimePartial: Boolean = false,
-    penaltiesWithoutRole: Int = 0,
-    unassignedPenalties: Int = 0,
-    unattributedPointsFor: PointTotal = PointTotal(),
-    unattributedPointsAgainst: PointTotal = PointTotal()
+    unassignedPenalties: Int = 0
 ):
   def penalties: Int = overall.penalties
 
-  def unattributedJamTime: Duration =
-    roles.valuesIterator.foldLeft(overall.activeJamTime)((time, role) => time.minus(role.activeJamTime).nn)
+  def uncertainRoleTime: Duration = roles.getOrElse(SkaterJamRole.Pack, ParticipationTotals()).timeSpread
 
 final case class StarPassCoverage(recorded: Int, verified: Int, estimated: Int = 0):
   private[application] def +(other: StarPassCoverage): StarPassCoverage =
@@ -126,8 +128,7 @@ object SkaterStatistics:
       skaters.get(penalty.skaterId).map(skater => SkaterStatisticsRow(
         skater,
         overall = ParticipationTotals(penalties = 1),
-        roles = JamParticipation.incompleteRoles(ParticipationTotals(penaltiesPartial = true)),
-        penaltiesWithoutRole = 1,
+        roles = JamParticipation.uncertainRoles(ParticipationTotals(possibleAdditionalPenalties = 1)),
         unassignedPenalties = 1
       ))
     }
@@ -175,11 +176,7 @@ object SkaterStatistics:
           roles = next.roles.foldLeft(first.roles) { case (roles, (role, participation)) =>
             roles.updated(role, roles.getOrElse(role, ParticipationTotals()) + participation)
           },
-          unattributedTimePartial = first.unattributedTimePartial || next.unattributedTimePartial,
-          penaltiesWithoutRole = first.penaltiesWithoutRole + next.penaltiesWithoutRole,
-          unassignedPenalties = first.unassignedPenalties + next.unassignedPenalties,
-          unattributedPointsFor = first.unattributedPointsFor + next.unattributedPointsFor,
-          unattributedPointsAgainst = first.unattributedPointsAgainst + next.unattributedPointsAgainst
+          unassignedPenalties = first.unassignedPenalties + next.unassignedPenalties
         )
       }
     }.toVector
