@@ -3,6 +3,8 @@ package rollerderby.mvp.adapter.crg
 import rollerderby.mvp.SampleFixtures
 import rollerderby.mvp.domain.Game
 
+import java.time.{LocalDate, LocalTime, ZoneOffset}
+
 class CrgSampleSuite extends munit.FunSuite:
   private case class ExpectedGame(
       filename: String,
@@ -87,39 +89,42 @@ class CrgSampleSuite extends munit.FunSuite:
 
   test("Discordias sample maps each kind of timing record") {
     val game = loadGame(discordiasFile)
-    assertEquals(game.eventDate, Some("2026-11-13"))
-    assertEquals(game.eventStartTime, Some("17:18"))
+    assertEquals(game.eventDate, Some(LocalDate.of(2026, 11, 13).nn))
+    assertEquals(game.eventStartTime, Some(LocalTime.of(17, 18).nn))
     assertEquals(game.periods.map(_.number), Vector(1, 2))
 
     val period = game.periods.find(_.number == 1).getOrElse(fail("expected period 1"))
-    assertEquals(period.localTimeStart, Some("2026-11-13T17:18:34.050-06:00[America/Mexico_City]"))
-    assertEquals(period.wallTimeStart.map(_.millis), Some(1794611914050L))
-    assertEquals(period.wallTimeEnd.map(_.millis), Some(1794614454997L))
-    assertEquals(period.duration.map(_.millis), Some(2540947L))
+    val localStart = period.localTimeStart.getOrElse(fail("expected a local period start"))
+    assertEquals(localStart.getZone.nn.getId.nn, "America/Mexico_City")
+    assertEquals(localStart.getOffset.nn, ZoneOffset.ofHours(-6).nn)
+    assertEquals(localStart.toInstant.nn.toEpochMilli, 1794611914050L)
+    assertEquals(period.wallTimeStart.map(_.toEpochMilli), Some(1794611914050L))
+    assertEquals(period.wallTimeEnd.map(_.toEpochMilli), Some(1794614454997L))
+    assertEquals(period.duration.map(_.toMillis), Some(2540947L))
 
     val jam = period.jams.find(_.number == 1).getOrElse(fail("expected jam 1"))
-    assertEquals(jam.wallTimeStart.map(_.millis), Some(1794611914061L))
-    assertEquals(jam.wallTimeEnd.map(_.millis), Some(1794611983954L))
-    assertEquals(jam.duration.map(_.millis), Some(70000L))
-    assertEquals(jam.periodClockElapsedStart.map(_.millis), Some(0L))
-    assertEquals(jam.periodClockElapsedEnd.map(_.millis), Some(70000L))
-    assertEquals(jam.periodClockDisplayEnd.map(_.millis), Some(1730000L))
+    assertEquals(jam.wallTimeStart.map(_.toEpochMilli), Some(1794611914061L))
+    assertEquals(jam.wallTimeEnd.map(_.toEpochMilli), Some(1794611983954L))
+    assertEquals(jam.duration.map(_.toMillis), Some(70000L))
+    assertEquals(jam.periodClockElapsedStart.map(_.value.toMillis), Some(0L))
+    assertEquals(jam.periodClockElapsedEnd.map(_.value.toMillis), Some(70000L))
+    assertEquals(jam.periodClockDisplayEnd.map(_.value.toMillis), Some(1730000L))
 
     val jamTeam = jam.teams.find(_.teamId == "1").getOrElse(fail("expected jam team 1"))
     val trip = jamTeam.trips.find(_.number == 1).getOrElse(fail("expected scoring trip 1"))
-    assertEquals(trip.jamClockStart.map(_.millis), Some(0L))
-    assertEquals(trip.jamClockEnd.map(_.millis), Some(63200L))
-    assertEquals(trip.duration.map(_.millis), Some(63200L))
+    assertEquals(trip.jamClockStart.map(_.value.toMillis), Some(0L))
+    assertEquals(trip.jamClockEnd.map(_.value.toMillis), Some(63200L))
+    assertEquals(trip.duration.map(_.toMillis), Some(63200L))
 
     val timeout = period.timeouts.find(_.id == "27391b68-76f8-4fbd-bf37-3018a06545aa")
       .getOrElse(fail("expected timeout"))
     assert(period.jams.exists(jam => jam.id.nonEmpty && jam.id == timeout.precedingJamId))
-    assertEquals(timeout.wallTimeStart.map(_.millis), Some(1794613366096L))
-    assertEquals(timeout.wallTimeEnd.map(_.millis), Some(1794613448920L))
-    assertEquals(timeout.duration.map(_.millis), Some(83000L))
-    assertEquals(timeout.periodClockElapsedStart.map(_.millis), Some(1252800L))
-    assertEquals(timeout.periodClockElapsedEnd.map(_.millis), Some(1252800L))
-    assertEquals(timeout.periodClockEnd.map(_.millis), Some(547200L))
+    assertEquals(timeout.wallTimeStart.map(_.toEpochMilli), Some(1794613366096L))
+    assertEquals(timeout.wallTimeEnd.map(_.toEpochMilli), Some(1794613448920L))
+    assertEquals(timeout.duration.map(_.toMillis), Some(83000L))
+    assertEquals(timeout.periodClockElapsedStart.map(_.value.toMillis), Some(1252800L))
+    assertEquals(timeout.periodClockElapsedEnd.map(_.value.toMillis), Some(1252800L))
+    assertEquals(timeout.periodClockEnd.map(_.value.toMillis), Some(547200L))
 
     val team = game.teams.find(_.id == "1").getOrElse(fail("expected team 1"))
     val boxTrip = team.boxTrips.find(_.id == "0e2ea502-b4e6-4bd9-a0ce-21070686c9fa")
@@ -127,20 +132,20 @@ class CrgSampleSuite extends munit.FunSuite:
     val fieldingIds = game.jams.flatMap(_.teams).flatMap(_.fieldingIds.values).toSet
     assert(boxTrip.startFieldingId.exists(fieldingIds.contains))
     assert(boxTrip.endFieldingId.exists(fieldingIds.contains))
-    assertEquals(boxTrip.wallTimeStart.map(_.millis), Some(1794617184642L))
-    assertEquals(boxTrip.wallTimeEnd.map(_.millis), Some(1794617283976L))
-    assertEquals(boxTrip.jamClockStart.map(_.millis), Some(0L))
-    assertEquals(boxTrip.jamClockEnd.map(_.millis), Some(44200L))
-    assertEquals(boxTrip.duration.map(_.millis), Some(23600L))
+    assertEquals(boxTrip.wallTimeStart.map(_.toEpochMilli), Some(1794617184642L))
+    assertEquals(boxTrip.wallTimeEnd.map(_.toEpochMilli), Some(1794617283976L))
+    assertEquals(boxTrip.jamClockStart.map(_.value.toMillis), Some(0L))
+    assertEquals(boxTrip.jamClockEnd.map(_.value.toMillis), Some(44200L))
+    assertEquals(boxTrip.duration.map(_.toMillis), Some(23600L))
     val skater = team.skaters.find(skater => boxTrip.currentSkaterId.contains(skater.id))
       .getOrElse(fail("expected box trip skater"))
     val penalty = skater.penalties.find(_.boxTripId.contains(boxTrip.id)).getOrElse(fail("expected penalty"))
-    assertEquals(penalty.enteredAt.map(_.millis), Some(1794617180874L))
+    assertEquals(penalty.enteredAt.map(_.toEpochMilli), Some(1794617180874L))
 
     val clock = game.clocks.find(_.id == "Jam").getOrElse(fail("expected jam clock"))
-    assertEquals(clock.time.map(_.millis), Some(72000L))
-    assertEquals(clock.invertedTime.map(_.millis), Some(48000L))
-    assertEquals(clock.maximumTime.map(_.millis), Some(120000L))
+    assertEquals(clock.time.map(_.value.toMillis), Some(72000L))
+    assertEquals(clock.invertedTime.map(_.value.toMillis), Some(48000L))
+    assertEquals(clock.maximumTime.map(_.toMillis), Some(120000L))
     assertEquals(clock.countsDown, Some(true))
     assertEquals(clock.running, Some(false))
   }
@@ -151,6 +156,6 @@ class CrgSampleSuite extends munit.FunSuite:
       jam <- game.jams if jam.period == 2 && jam.number == 19
       team <- jam.teams if team.teamId == "2"
       trip <- team.trips if trip.number == 2
-    yield trip.duration.map(_.millis)
+    yield trip.duration.map(_.toMillis)
     assertEquals(durations, Vector(Some(-19000L)))
   }

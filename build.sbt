@@ -79,6 +79,12 @@ lazy val core = crossProject(JSPlatform, JVMPlatform)
   .in(file("core"))
   .settings(wartremoverSettings)
   .jsSettings(scalaJSValidationSettings)
+  .jsSettings(
+    libraryDependencies ++= Seq(
+      "io.github.cquiroz" %% "scala-java-time" % "2.7.0",
+      "io.github.cquiroz" %% "scala-java-time-tzdb" % "2.7.0"
+    )
+  )
   .settings(publish / skip := true)
 
 lazy val crgImport = crossProject(JSPlatform, JVMPlatform)

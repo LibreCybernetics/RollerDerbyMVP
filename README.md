@@ -57,7 +57,7 @@ Place sample exports in [fixtures/samples](fixtures/samples/). If known, include
 
 Use `CrgFileGameSource().loadRaw(path)` to inspect the complete JSON export as a `CrgExport`. Object members retain their order and duplicate keys, and numbers retain their original tokens. `CrgDomainMapper.toGames(export)` maps game records under `state.ScoreBoard.Game(id)` from single-game and full scoreboard exports. `CrgFileGameSource().load(path)` runs both stages.
 
-The domain model includes wall-clock timestamps, durations, and clock readings in milliseconds. It keeps recorded durations and clock values as supplied, including explicit zeros and signed values. The `inspect` command summarizes scores, roster counts, and the number of historical jams.
+The domain uses `Instant` for wall-clock timestamps, `Duration` for recorded durations, and `ClockReading` for positions on a scoreboard clock. Zero wall-clock endpoints indicate missing timestamps. Clock readings and durations retain explicit zeros and signed values. Event date and start time are local calendar values, and each period can also carry the scoreboard host's recorded zoned start time. The `inspect` command summarizes scores, roster counts, and the number of historical jams.
 
 ## Source layout
 

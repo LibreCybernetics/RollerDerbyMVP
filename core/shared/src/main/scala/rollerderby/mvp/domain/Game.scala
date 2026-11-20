@@ -1,13 +1,15 @@
 package rollerderby.mvp.domain
 
+import java.time.{Duration, Instant, LocalDate, LocalTime, ZonedDateTime}
+
 final case class Game(
     id: String,
     name: Option[String],
     officialScore: Option[Boolean],
     teams: Vector[Team],
     periods: Vector[Period],
-    eventDate: Option[String] = None,
-    eventStartTime: Option[String] = None,
+    eventDate: Option[LocalDate] = None,
+    eventStartTime: Option[LocalTime] = None,
     clocks: Vector[ClockSnapshot] = Vector.empty
 ) derives CanEqual:
   def jams: Vector[Jam] = periods.flatMap(_.jams)
@@ -28,17 +30,17 @@ final case class Skater(
     preparedSkaterId: Option[String],
     penaltyCount: Option[Int],
     penalties: Vector[Penalty] = Vector.empty,
-    extraPenaltyTime: Option[DurationMillis] = None
+    extraPenaltyTime: Option[Duration] = None
 )
 
 final case class Period(
     number: Int,
     jams: Vector[Jam],
     timeouts: Vector[Timeout],
-    wallTimeStart: Option[WallTimeMillis],
-    wallTimeEnd: Option[WallTimeMillis],
-    localTimeStart: Option[String],
-    duration: Option[DurationMillis]
+    wallTimeStart: Option[Instant],
+    wallTimeEnd: Option[Instant],
+    localTimeStart: Option[ZonedDateTime],
+    duration: Option[Duration]
 )
 
 final case class Jam(
@@ -46,12 +48,12 @@ final case class Jam(
     number: Int,
     teams: Vector[JamTeam],
     id: Option[String] = None,
-    wallTimeStart: Option[WallTimeMillis] = None,
-    wallTimeEnd: Option[WallTimeMillis] = None,
-    duration: Option[DurationMillis] = None,
-    periodClockElapsedStart: Option[ClockMillis] = None,
-    periodClockElapsedEnd: Option[ClockMillis] = None,
-    periodClockDisplayEnd: Option[ClockMillis] = None
+    wallTimeStart: Option[Instant] = None,
+    wallTimeEnd: Option[Instant] = None,
+    duration: Option[Duration] = None,
+    periodClockElapsedStart: Option[ClockReading] = None,
+    periodClockElapsedEnd: Option[ClockReading] = None,
+    periodClockDisplayEnd: Option[ClockReading] = None
 )
 
 final case class JamTeam(
@@ -67,20 +69,20 @@ final case class ScoringTrip(
     number: Int,
     score: Option[Int],
     afterStarPass: Option[Boolean],
-    jamClockStart: Option[ClockMillis] = None,
-    jamClockEnd: Option[ClockMillis] = None,
-    duration: Option[DurationMillis] = None
+    jamClockStart: Option[ClockReading] = None,
+    jamClockEnd: Option[ClockReading] = None,
+    duration: Option[Duration] = None
 )
 
 final case class Timeout(
     id: String,
     precedingJamId: Option[String],
-    wallTimeStart: Option[WallTimeMillis],
-    wallTimeEnd: Option[WallTimeMillis],
-    duration: Option[DurationMillis],
-    periodClockElapsedStart: Option[ClockMillis],
-    periodClockElapsedEnd: Option[ClockMillis],
-    periodClockEnd: Option[ClockMillis]
+    wallTimeStart: Option[Instant],
+    wallTimeEnd: Option[Instant],
+    duration: Option[Duration],
+    periodClockElapsedStart: Option[ClockReading],
+    periodClockElapsedEnd: Option[ClockReading],
+    periodClockEnd: Option[ClockReading]
 )
 
 final case class Penalty(
@@ -88,7 +90,7 @@ final case class Penalty(
     id: Option[String],
     jamId: Option[String],
     boxTripId: Option[String],
-    enteredAt: Option[WallTimeMillis]
+    enteredAt: Option[Instant]
 )
 
 final case class BoxTrip(
@@ -96,23 +98,21 @@ final case class BoxTrip(
     currentSkaterId: Option[String],
     startFieldingId: Option[String],
     endFieldingId: Option[String],
-    wallTimeStart: Option[WallTimeMillis],
-    wallTimeEnd: Option[WallTimeMillis],
-    jamClockStart: Option[ClockMillis],
-    jamClockEnd: Option[ClockMillis],
-    duration: Option[DurationMillis],
-    clockTime: Option[ClockMillis]
+    wallTimeStart: Option[Instant],
+    wallTimeEnd: Option[Instant],
+    jamClockStart: Option[ClockReading],
+    jamClockEnd: Option[ClockReading],
+    duration: Option[Duration],
+    clockTime: Option[ClockReading]
 )
 
 final case class ClockSnapshot(
     id: String,
-    time: Option[ClockMillis],
-    invertedTime: Option[ClockMillis],
-    maximumTime: Option[ClockMillis],
+    time: Option[ClockReading],
+    invertedTime: Option[ClockReading],
+    maximumTime: Option[Duration],
     countsDown: Option[Boolean],
     running: Option[Boolean]
 )
 
-final case class WallTimeMillis(millis: Long) extends AnyVal derives CanEqual
-final case class DurationMillis(millis: Long) extends AnyVal derives CanEqual
-final case class ClockMillis(millis: Long) extends AnyVal derives CanEqual
+final case class ClockReading(value: Duration) extends AnyVal derives CanEqual

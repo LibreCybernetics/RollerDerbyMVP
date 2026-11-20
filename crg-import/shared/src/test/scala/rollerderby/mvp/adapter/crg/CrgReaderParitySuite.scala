@@ -75,15 +75,52 @@ class CrgReaderParitySuite extends munit.FunSuite:
       def readValue(value: String) = decode(state(scores + s""","$key":$value"""))
 
       val timestamp = readValue("9.007199254740993e15").fold(error => fail(error), identity)
-      assertEquals(timestamp.flatMap(_.jams).map(_.wallTimeStart.map(_.millis)), Vector(Some(9007199254740993L)))
+      assertEquals(timestamp.flatMap(_.jams).map(_.wallTimeStart.map(_.toEpochMilli)), Vector(Some(9007199254740993L)))
       val minimum = readValue("-9223372036854775808").fold(error => fail(error), identity)
-      assertEquals(minimum.flatMap(_.jams).map(_.wallTimeStart.map(_.millis)), Vector(Some(Long.MinValue)))
+      assertEquals(minimum.flatMap(_.jams).map(_.wallTimeStart.map(_.toEpochMilli)), Vector(Some(Long.MinValue)))
       val maximum = readValue("9223372036854775807.0").fold(error => fail(error), identity)
-      assertEquals(maximum.flatMap(_.jams).map(_.wallTimeStart.map(_.millis)), Vector(Some(Long.MaxValue)))
+      assertEquals(maximum.flatMap(_.jams).map(_.wallTimeStart.map(_.toEpochMilli)), Vector(Some(Long.MaxValue)))
       val unset = readValue("null").fold(error => fail(error), identity)
       assertEquals(unset.flatMap(_.jams).map(jam => jam.wallTimeStart -> jam.wallTimeEnd), Vector(None -> None))
       Seq("17.1", "\"17\"", "9223372036854775808", "9223372036854775807.1", "true").foreach { value =>
         assertEquals(readValue(value), Left(s"state.$key: expected a 64-bit integer"))
+      }
+    }
+  }
+
+  test("the domain handles unset timestamps and blank calendar values while retaining zero clock readings") {
+    val gameKey = "ScoreBoard.Game(g)"
+    val periodKey = s"$gameKey.Period(1)"
+    val jamKey = s"$periodKey.Jam(1)"
+    val input = state(scores + s""",
+      "$gameKey.EventInfo(Date)":"",
+      "$gameKey.EventInfo(StartTime)":null,
+      "$periodKey.LocalTimeStart":" ",
+      "$jamKey.WalltimeEnd":0,
+      "$jamKey.Duration":0,
+      "$jamKey.PeriodClockElapsedStart":0""")
+
+    Seq(CrgJson.decode, JsoniterCrgJson.decode).foreach { decode =>
+      val games = decode(input).fold(error => fail(error), identity)
+      assertEquals(games.map(game => game.eventDate -> game.eventStartTime), Vector(None -> None))
+      assertEquals(games.flatMap(_.periods).map(_.localTimeStart), Vector(None))
+      val jams = games.flatMap(_.jams)
+      assertEquals(jams.map(_.wallTimeEnd), Vector(None))
+      assertEquals(jams.map(_.duration.map(_.toMillis)), Vector(Some(0L)))
+      assertEquals(jams.map(_.periodClockElapsedStart.map(_.value.toMillis)), Vector(Some(0L)))
+    }
+  }
+
+  test("invalid calendar values identify the CRG field") {
+    val cases = Vector(
+      ("EventInfo(Date)", "2026-02-30", "an ISO local date"),
+      ("EventInfo(StartTime)", "25:00", "an ISO local time"),
+      ("Period(1).LocalTimeStart", "2026-11-13T17:18:34", "an ISO zoned date-time")
+    )
+    Seq(CrgJson.decode, JsoniterCrgJson.decode).foreach { decode =>
+      cases.foreach { case (field, value, expected) =>
+        val key = s"ScoreBoard.Game(g).$field"
+        assertEquals(decode(state(scores + s""","$key":"$value"""")), Left(s"state.$key: expected $expected"))
       }
     }
   }

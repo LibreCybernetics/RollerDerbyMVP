@@ -2,6 +2,7 @@ package rollerderby.mvp.adapter.crg
 
 import rollerderby.mvp.domain.*
 
+import java.time.{DateTimeException, Duration, Instant, LocalDate, LocalTime, ZonedDateTime}
 import scala.util.Try
 
 object CrgDomainMapper:
@@ -38,7 +39,7 @@ object CrgDomainMapper:
         id = name,
         time = clock.clock("Time"),
         invertedTime = clock.clock("InvertedTime"),
-        maximumTime = clock.clock("MaximumTime"),
+        maximumTime = clock.duration("MaximumTime"),
         countsDown = clock.boolean("Direction"),
         running = clock.boolean("Running")
       )
@@ -49,8 +50,8 @@ object CrgDomainMapper:
       officialScore = fields.boolean("OfficialScore"),
       teams = sides,
       periods = periods,
-      eventDate = fields.text("EventInfo(Date)"),
-      eventStartTime = fields.text("EventInfo(StartTime)"),
+      eventDate = fields.calendarTime("EventInfo(Date)", "an ISO local date")(value => LocalDate.parse(value).nn),
+      eventStartTime = fields.calendarTime("EventInfo(StartTime)", "an ISO local time")(value => LocalTime.parse(value).nn),
       clocks = clocks
     )
 
@@ -70,13 +71,16 @@ object CrgDomainMapper:
         periodClockEnd = timeout.clock("PeriodClockEnd")
       )
     }
+    val localTimeStart = fields.calendarTime("LocalTimeStart", "an ISO zoned date-time") { value =>
+      ZonedDateTime.parse(value).nn
+    }
     Period(
       number = number,
       jams = jams,
       timeouts = timeouts,
       wallTimeStart = fields.wallTime("WalltimeStart"),
       wallTimeEnd = fields.wallTime("WalltimeEnd"),
-      localTimeStart = fields.text("LocalTimeStart"),
+      localTimeStart = localTimeStart,
       duration = fields.duration("Duration")
     )
 
@@ -120,7 +124,7 @@ object CrgDomainMapper:
         id = penalty.nonEmptyText("Id"),
         jamId = penalty.nonEmptyText("Jam"),
         boxTripId = penalty.nonEmptyText("BoxTrip"),
-        enteredAt = penalty.wallTime("Time")
+        enteredAt = penalty.instant("Time")
       )
     }
     Skater(
@@ -185,9 +189,24 @@ object CrgDomainMapper:
         case CrgValue.Number(token) => exactLong(token).filter(_.isValidInt).map(_.toInt)
       }
 
-    def wallTime(key: String): Option[WallTimeMillis] = long(key).map(WallTimeMillis.apply)
-    def duration(key: String): Option[DurationMillis] = long(key).map(DurationMillis.apply)
-    def clock(key: String): Option[ClockMillis] = long(key).map(ClockMillis.apply)
+    def wallTime(key: String): Option[Instant] =
+      // CRG leaves wall-clock endpoints at zero until the event starts or ends.
+      long(key).filter(_ != 0L).map(millis => Instant.ofEpochMilli(millis).nn)
+
+    def instant(key: String): Option[Instant] =
+      long(key).map(millis => Instant.ofEpochMilli(millis).nn)
+
+    def duration(key: String): Option[Duration] =
+      long(key).map(millis => Duration.ofMillis(millis).nn)
+
+    def clock(key: String): Option[ClockReading] = duration(key).map(ClockReading.apply)
+
+    def calendarTime[A](key: String, expected: String)(parse: String => A): Option[A] =
+      text(key).filterNot(_.isBlank).map { value =>
+        try parse(value)
+        catch
+          case _: DateTimeException => invalid(s"$path.$key: expected $expected")
+      }
 
     def boolean(key: String): Option[Boolean] =
       field(key, "a boolean") { case CrgValue.BooleanValue(value) => Some(value) }
