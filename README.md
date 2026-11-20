@@ -19,7 +19,7 @@ Pass multiple paths to inspect multiple exports. The command reports file and fi
 
 Place sample exports in [fixtures/samples](fixtures/samples/). If known, include the CRG release and whether each file is a single-game export or a full scoreboard export.
 
-The initial reader targets the flat `state` object written by CRG ScoreBoard 2025.8. It imports game records under `ScoreBoard.Game(id)` from either export type. The checked-in synthetic fixture exercises this format.
+The reader imports the flat `state` object in CRG ScoreBoard exports. It reads game records under `ScoreBoard.Game(id)` from single-game and full scoreboard exports. The reader was checked against the supplied v2027.1 game exports, and the shared test suite includes a synthetic multi-game export. Summaries show the recorded scores, roster counts, and number of jams in game periods.
 
 ## Source layout
 

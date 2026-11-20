@@ -18,6 +18,10 @@ lazy val cli = crossProject(JSPlatform, JVMPlatform)
     ),
     publish / skip := true
   )
+  .jvmSettings(
+    Compile / run / fork := true,
+    Compile / run / baseDirectory := (LocalRootProject / baseDirectory).value
+  )
   .jsSettings(
     scalaJSUseMainModuleInitializer := true,
     scalaJSLinkerConfig ~= (_.withModuleKind(ModuleKind.CommonJSModule))
