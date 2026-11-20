@@ -109,7 +109,8 @@ object CrgDomainMapper:
       duration = fields.duration("Duration"),
       periodClockElapsedStart = fields.clock("PeriodClockElapsedStart"),
       periodClockElapsedEnd = fields.clock("PeriodClockElapsedEnd"),
-      periodClockDisplayEnd = fields.clock("PeriodClockDisplayEnd")
+      periodClockDisplayEnd = fields.clock("PeriodClockDisplayEnd"),
+      starPass = fields.boolean("StarPass")
     )
 
   private def gameSide(
@@ -185,7 +186,9 @@ object CrgDomainMapper:
         id = penalty.nonEmptyText("Id").map(token => PenaltyId(ExternalId.fromString(token))),
         jam = references.jam(penalty, "Jam"),
         boxTrip = references.boxTrip(id.side.side, penalty, "BoxTrip"),
-        enteredAt = penalty.instant("Time")
+        enteredAt = penalty.instant("Time"),
+        occurredAtJamTime = penalty.duration("MVP.OccurredAtElapsedMillis"),
+        afterStarPass = penalty.boolean("MVP.AfterStarPass")
       )
     }
 
@@ -197,7 +200,8 @@ object CrgDomainMapper:
         fielding.boolean("NotFielded").contains(true)
       )
     }
-    val trips = fields.numberedChildren("ScoringTrip").map { case (number, trip) =>
+    val tripFields = fields.numberedChildren("ScoringTrip")
+    val trips = tripFields.map { case (number, trip) =>
       ScoringTrip(
         key = ScoringTripKey(key, side, number),
         score = trip.integer("Score"),
@@ -207,7 +211,17 @@ object CrgDomainMapper:
         duration = trip.duration("Duration")
       )
     }
-    JamTeam(side, fields.integer("JamScore"), fields.boolean("Lead"), fieldings, trips)
+    JamTeam(
+      side = side,
+      score = fields.integer("JamScore"),
+      lead = fields.boolean("Lead"),
+      fieldings = fieldings,
+      trips = trips,
+      starPass = fields.boolean("StarPass"),
+      starPassElapsed = fields.duration("MVP.StarPassElapsedMillis"),
+      afterStarPassScore = fields.integer("AfterSPScore"),
+      starPassTrip = references.starPassTrip(key, side, fields, tripFields)
+    )
 
   private def gameSideKey(token: String, fields: Fields): Side = token match
     case "1" => Side.One
@@ -279,6 +293,16 @@ object CrgDomainMapper:
 
     def boxTrip(side: Side, fields: Fields, field: String): Option[EntityReference[BoxTripId]] =
       resolve(fields, field)(token => boxTripIds.get(side -> token))
+
+    def starPassTrip(
+        jam: JamKey, side: Side, fields: Fields, trips: Vector[(Int, Fields)]
+    ): Option[EntityReference[ScoringTripKey]] =
+      resolve(fields, "StarPassTrip") { token =>
+        val matches = trips.collect {
+          case (number, trip) if trip.nonEmptyText("Id").contains(token) => ScoringTripKey(jam, side, number)
+        }
+        Option.when(matches.nonEmpty)(matches)
+      }
 
     private def aliases(token: String, fields: Fields): Vector[String] =
       (token +: fields.nonEmptyText("Id").toVector).distinct

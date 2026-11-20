@@ -31,6 +31,30 @@ class DirectoryInputSuite extends munit.FunSuite:
     val stats = run(tournament, sampleDirectory)
     assertEquals(stats.status, 0)
     assertEquals(stats, run(tournament, files*))
+    assertEquals(stats.out.lastOption, Some("Star-pass timing: 0 of 178 team passes verified · 470m21s unattributed skater time"))
+    val rows = stats.out.drop(2).dropRight(1).map(_.split(" {2,}").nn.toVector.map(_.nn))
+    val (overall, byRole) = rows.partition(_.lift(2).contains("All roles"))
+    def penaltiesIn(rows: Vector[Vector[String]]): Int =
+      rows.flatMap(_.lift(5)).map(_.stripSuffix(" (partial)").toInt).sum
+    val withoutRole = overall.flatMap(_.lift(12)).map(_.toInt).sum
+    assertEquals(penaltiesIn(overall), 1000)
+    assert(withoutRole > 0)
+    assertEquals(penaltiesIn(byRole) + withoutRole, 1000)
+
+    val duration = """(\d+)m(\d{2})(?:\.(\d{3}))?s""".r
+    def millis(cell: String): Long = cell.stripSuffix(" (partial)") match
+      case duration(minutes, seconds, fraction) =>
+        minutes.nn.toLong * 60000 + seconds.nn.toLong * 1000 + Option(fraction).fold(0L)(_.toLong)
+      case value => fail(s"Unexpected duration '$value'")
+    val starts = rows.indices.filter(index => rows.lift(index).flatMap(_.lift(2)).contains("All roles"))
+    assertEquals(starts.size, 149)
+    starts.zip(starts.drop(1) :+ rows.size).foreach { case (start, end) =>
+      val group = rows.slice(start, end)
+      val total = group.headOption.flatMap(_.lift(4)).map(millis)
+      val unattributed = group.headOption.flatMap(_.lift(13)).map(millis)
+      val roleTime = group.drop(1).flatMap(_.lift(4)).map(millis).sum
+      assertEquals(total, unattributed.map(_ + roleTime), group.headOption.map(_.take(2)).toString)
+    }
   }
 
   test("mixed operands keep their order and expand immediate JSON files in filename order") {

@@ -11,7 +11,8 @@ final case class Jam(
     duration: Option[Duration] = None,
     periodClockElapsedStart: Option[ClockReading] = None,
     periodClockElapsedEnd: Option[ClockReading] = None,
-    periodClockDisplayEnd: Option[ClockReading] = None
+    periodClockDisplayEnd: Option[ClockReading] = None,
+    starPass: Option[Boolean] = None
 ):
   def period: Int = key.period.number
   def number: Int = key.number
@@ -24,7 +25,11 @@ final case class JamTeam(
     score: Option[Int],
     lead: Option[Boolean],
     fieldings: Vector[Fielding],
-    trips: Vector[ScoringTrip]
+    trips: Vector[ScoringTrip],
+    starPass: Option[Boolean] = None,
+    starPassElapsed: Option[Duration] = None,
+    afterStarPassScore: Option[Int] = None,
+    starPassTrip: Option[EntityReference[ScoringTripKey]] = None
 )
 
 final case class ScoringTrip(

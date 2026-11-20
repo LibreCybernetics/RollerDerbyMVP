@@ -1,23 +1,29 @@
 package rollerderby.mvp.adapter.cli
 
 import rollerderby.mvp.application.{
-  ImportError, ImportGames, ImportedGames, SkaterStatistics, SkaterStatisticsRow, StatisticSkater, TournamentSkaterStatistics
+  ImportError, ImportGames, ImportedGames, ParticipationTotals, PointTotal, SkaterJamRole, SkaterStatistics,
+  SkaterStatisticsRow, StarPassCoverage, StatisticSkater, TournamentSkaterStatistics
 }
 import rollerderby.mvp.domain.{Game, GameId, GameSideId, SkaterId, TeamId}
+
+import java.time.Duration
 
 final class CommandLine(
     importGames: ImportGames,
     printOut: String => Unit,
     printError: String => Unit,
-    expandInput: String => Either[ImportError, Vector[String]] = path => Right(Vector(path))
+    expandInput: String => Either[ImportError, Vector[String]] = path => Right(Vector(path)),
+    readTimingFile: String => Either[String, String] = _ => Left("timing-file reader unavailable")
 ):
-  private val statisticsUsage = "roller-derby-mvp skater-stats [--by jam|game|tournament] <file-or-directory>..."
+  private val statisticsUsage =
+    "roller-derby-mvp skater-stats [--by jam|game|tournament] [--event-timings <file>] <file-or-directory>..."
   private val penaltyUsage = "roller-derby-mvp penalty-stats <file-or-directory>..."
   private val usage = s"Usage: roller-derby-mvp inspect <file>...\n       $statisticsUsage\n       $penaltyUsage"
   private val directoryHelp = "Directories contribute their immediate .json files in filename order."
   private val statisticsHelp = s"""Usage: $statisticsUsage
-    |Report penalties and active jam time by team and skater. Default scope is game.
-    |Active jam time is the sum of recorded jam durations when fielded, including penalty-box time.
+    |Report jams, active jam time, penalties and team scoring by skater and role. Default scope is game.
+    |Pack combines blockers and pivots. Verified star-pass timing splits active jam time between roles.
+    |--event-timings takes a UTF-8 TSV file with verified star-pass and penalty event timings.
     |Tournament scope combines all games in the supplied files.
     |$directoryHelp""".stripMargin
 
@@ -46,7 +52,7 @@ final class CommandLine(
     case "skater-stats" +: options => skaterStatistics(options)
     case "penalty-stats" +: operands =>
       inputPaths(operands) match
-        case Some(paths) => reportTournament(paths)(printPenaltyStatistics)
+        case Some(paths) => reportTournament(importStatistics(paths))(printPenaltyStatistics)
         case None =>
           printError(s"Usage: $penaltyUsage")
           2
@@ -55,21 +61,41 @@ final class CommandLine(
       2
 
   private def skaterStatistics(options: Vector[String]): Int =
-    val (scope, operands) = options match
-      case "--by" +: scope +: paths => (scope, paths)
-      case paths => ("game", paths)
-    (scope, inputPaths(operands)) match
-      case ("jam" | "game", Some(files)) =>
-        reportGames(importStatistics(files))((path, game) => printGameStatistics(path, game, scope == "jam"))
-      case ("tournament", Some(files)) =>
-        reportTournament(files) { statistics =>
-          printOut("Tournament totals")
-          val rows = sorted(statistics.totals).map(row => cells(row, totals = true, showGameLocalIds = true))
-          printTable(columns :+ "Unassigned penalties", rows)
-        }
-      case _ =>
+    statisticsOptions(options) match
+      case None =>
         printError(s"Usage: $statisticsUsage")
         2
+      case Some((scope, timingFile, files)) =>
+        val imports = importStatistics(files)
+        val verified = timingFile.fold(Right(imports): Either[Vector[String], Vector[Either[ImportError, ImportedGames]]]) { path =>
+          readTimingFile(path).left.map(Vector(_)).flatMap(text => EventTimingFile(text, imports))
+            .left.map(_.map(error => s"$path: $error"))
+        }
+        verified match
+          case Left(issues) =>
+            imports.flatMap(_.left.toOption).foreach(error => printError(s"${error.path}: ${error.detail}"))
+            issues.foreach(printError)
+            1
+          case Right(results) if scope == "tournament" =>
+            reportTournament(results) { statistics =>
+              printOut("Tournament totals")
+              printTable(columns, sorted(statistics.totals).flatMap(row => cells(row, showGameLocalIds = true)))
+              printCoverage(statistics.coverage, statistics.totals)
+              statistics.roleWarnings.foreach(printError)
+            }
+          case Right(results) =>
+            reportGames(results)((path, game) => printGameStatistics(path, game, scope == "jam"))
+
+  private def statisticsOptions(
+      args: Vector[String],
+      scope: Option[String] = None,
+      timings: Option[String] = None
+  ): Option[(String, Option[String], Vector[String])] = args match
+    case "--by" +: (value @ ("jam" | "game" | "tournament")) +: rest if scope.isEmpty =>
+      statisticsOptions(rest, Some(value), timings)
+    case "--event-timings" +: file +: rest if timings.isEmpty && !file.startsWith("-") && file.nonEmpty =>
+      statisticsOptions(rest, scope, Some(file))
+    case paths => inputPaths(paths).map((scope.getOrElse("game"), timings, _))
 
   private def inputPaths(operands: Vector[String]): Option[Vector[String]] = operands match
     case "--" +: files if files.nonEmpty => Some(files)
@@ -95,16 +121,18 @@ final class CommandLine(
     printOut(s"$path: ${gameLabel(game.id, game.name)}")
     if byJam then
       val rows = statistics.jams.sortBy(jam => (jam.key.period.number, jam.key.number)).flatMap { jam =>
-        sorted(jam.rows).map { row =>
-          Vector(jam.key.period.number.toString, jam.key.number.toString) ++ cells(row, totals = false)
+        sorted(jam.rows).flatMap { row =>
+          cells(row).map(Vector(jam.key.period.number.toString, jam.key.number.toString) ++ _)
         }
       }
       printTable(Vector("Period", "Jam") ++ columns, rows)
-    else printTable(columns :+ "Unassigned penalties", sorted(statistics.totals).map(row => cells(row, totals = true)))
-    statistics.warnings.foreach(warning => printError(s"$path: game ${game.id.value}: $warning"))
+    else printTable(columns, sorted(statistics.totals).flatMap(row => cells(row)))
+    printCoverage(statistics.coverage, statistics.totals)
+    (statistics.warnings ++ statistics.roleWarnings).foreach(warning => printError(s"$path: game ${game.id.value}: $warning"))
 
-  private def reportTournament(paths: Vector[String])(report: TournamentSkaterStatistics => Unit): Int =
-    val results = importStatistics(paths)
+  private def reportTournament(
+      results: Vector[Either[ImportError, ImportedGames]]
+  )(report: TournamentSkaterStatistics => Unit): Int =
     val errors = results.flatMap(_.left.toOption)
     if errors.nonEmpty then
       errors.foreach(error => printError(s"${error.path}: ${error.detail}"))
@@ -118,6 +146,11 @@ final class CommandLine(
           report(statistics)
           statistics.warnings.foreach(printError)
           0
+
+  private def printCoverage(coverage: StarPassCoverage, rows: Vector[SkaterStatisticsRow]): Unit =
+    val time = rows.iterator.foldLeft(Duration.ZERO.nn)((sum, row) => sum.plus(row.unattributedJamTime).nn)
+    val displayed = partial(duration(time), rows.exists(_.unattributedTimePartial))
+    printOut(s"Star-pass timing: ${coverage.verified} of ${coverage.recorded} team passes verified · $displayed unattributed skater time")
 
   private def printPenaltyStatistics(statistics: TournamentSkaterStatistics): Unit =
     val gameNoun = if statistics.games.size == 1 then "game" else "games"
@@ -145,7 +178,11 @@ final class CommandLine(
     }
     printTable(Vector("Team", "Skater", "Penalties", "Unassigned penalties"), entries)
 
-  private val columns = Vector("Team", "Skater", "Penalties", "Active jam time")
+  private val columns = Vector(
+    "Team", "Skater", "Role", "Jams", "Active jam time", "Penalties", "Penalties/min",
+    "Points for", "Points against", "For/min", "Against/min", "Unassigned penalties",
+    "Penalties without role", "Unattributed jam time"
+  )
 
   private def sorted(rows: Vector[SkaterStatisticsRow]): Vector[SkaterStatisticsRow] =
     rows.sortBy { row =>
@@ -155,14 +192,48 @@ final class CommandLine(
 
   private def cells(
       row: SkaterStatisticsRow,
-      totals: Boolean,
       showGameLocalIds: Boolean = false
-  ): Vector[String] =
-    val seconds = row.activeJamTime.getSeconds
-    val time = f"${seconds / 60}%dm${seconds % 60}%02ds"
-    val displayTime = if row.jamsWithoutDuration > 0 then s"$time (partial)" else time
-    skaterCells(row.skater, showGameLocalIds) ++ Vector(row.penalties.toString, displayTime) ++
-      Option.when(totals)(row.unassignedPenalties.toString)
+  ): Vector[Vector[String]] =
+    val skater = skaterCells(row.skater, showGameLocalIds)
+    val overall = skater ++ Vector("All roles") ++ metrics(row.overall) ++ Vector(
+      row.unassignedPenalties.toString,
+      row.penaltiesWithoutRole.toString,
+      partial(duration(row.unattributedJamTime), row.unattributedTimePartial)
+    )
+    val roles = SkaterJamRole.values.toVector.flatMap(role =>
+      row.roles.get(role).filter(_.jams > 0).map(totals =>
+        skater ++ Vector(role.toString) ++ metrics(totals) ++ Vector("—", "—", "—")
+      )
+    )
+    overall +: roles
+
+  private def metrics(totals: ParticipationTotals): Vector[String] =
+    val time = totals.activeJamTime
+    val minutes = (time.getSeconds.toDouble + time.getNano / 1e9) / 60.0
+    def rate(count: Int, incomplete: Boolean): String =
+      if minutes <= 0 || totals.timePartial || incomplete then "—"
+      else f"${count / minutes}%.2f"
+    Vector(
+      totals.jams.toString,
+      partial(duration(time), totals.timePartial),
+      partial(totals.penalties.toString, totals.penaltiesPartial),
+      rate(totals.penalties, totals.penaltiesPartial),
+      points(totals.pointsFor),
+      points(totals.pointsAgainst),
+      rate(totals.pointsFor.known, totals.pointsFor.partial),
+      rate(totals.pointsAgainst.known, totals.pointsAgainst.partial)
+    )
+
+  private def points(total: PointTotal): String = partial(total.known.toString, total.partial)
+
+  private def duration(value: Duration): String =
+    val seconds = value.getSeconds
+    val whole = f"${seconds / 60}%dm${seconds % 60}%02d"
+    val millis = value.getNano / 1000000
+    if millis == 0 then s"${whole}s" else f"$whole.$millis%03ds"
+
+  private def partial(value: String, incomplete: Boolean): String =
+    if incomplete then s"$value (partial)" else value
 
   private def skaterCells(skater: StatisticSkater, showGameLocalIds: Boolean): Vector[String] =
     val label = skater.rosterNumber.filter(_.nonEmpty).map(number => s"#$number ").getOrElse("") + skaterName(skater)

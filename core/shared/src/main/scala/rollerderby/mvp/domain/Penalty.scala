@@ -7,7 +7,9 @@ final case class Penalty(
     id: Option[PenaltyId],
     jam: Option[EntityReference[JamKey]],
     boxTrip: Option[EntityReference[BoxTripId]],
-    enteredAt: Option[Instant]
+    enteredAt: Option[Instant],
+    occurredAtJamTime: Option[Duration] = None,
+    afterStarPass: Option[Boolean] = None
 ):
   def skaterId: GameSkaterId = key.skaterId
   def number: Int = key.number

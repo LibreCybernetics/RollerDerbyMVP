@@ -9,12 +9,14 @@ import scala.scalajs.js.annotation.JSImport
 
 object Main:
   def main(args: Array[String]): Unit =
+    val source = CrgFileGameSource()
     val command = new CommandLine(
-      new ImportGamesService(CrgFileGameSource()),
+      new ImportGamesService(source),
       println,
       message =>
         val _ = js.Dynamic.global.console.error(message),
-      LocalInputPaths.inputs.expand
+      LocalInputPaths.inputs.expand,
+      source.readText
     )
     NodeProcess.exitCode = command.run(NodeProcess.argv.toVector.drop(2))
 

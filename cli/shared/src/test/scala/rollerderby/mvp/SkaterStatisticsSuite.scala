@@ -8,15 +8,32 @@ import scala.collection.mutable.ArrayBuffer
 
 class SkaterStatisticsSuite extends munit.FunSuite:
   private final case class Result(status: Int, lines: Vector[String], errors: Vector[String]):
-    def table: Vector[Vector[String]] = lines.drop(1).map(_.split(" {2,}").nn.toVector.map(_.nn))
+    def table: Vector[Vector[String]] =
+      lines.drop(1).filterNot(_.startsWith("Star-pass timing:")).map(_.split(" {2,}").nn.toVector.map(_.nn))
+
+  private def overallRows(result: Result, byJam: Boolean = false): Vector[Vector[String]] =
+    val prefix = if byJam then 4 else 2
+    result.table.filter(_.lift(prefix).contains("All roles")).map { row =>
+      val others = if byJam then Vector.empty else row.slice(prefix + 9, prefix + 10)
+      row.take(prefix) ++ row.slice(prefix + 3, prefix + 4) ++ row.slice(prefix + 2, prefix + 3) ++ others
+    }
 
   private def run(source: GameSource, args: String*): Result =
     runCommand(source, "skater-stats" +: args.toVector)
 
-  private def runCommand(source: GameSource, args: Vector[String]): Result =
+  private def runCommand(
+      source: GameSource,
+      args: Vector[String],
+      readTimingFile: String => Either[String, String] = _ => Left("missing timing file")
+  ): Result =
     val out = ArrayBuffer.empty[String]
     val errors = ArrayBuffer.empty[String]
-    val cli = new CommandLine(new ImportGamesService(source), line => { out += line; () }, line => { errors += line; () })
+    val cli = new CommandLine(
+      new ImportGamesService(source),
+      line => { out += line; () },
+      line => { errors += line; () },
+      readTimingFile = readTimingFile
+    )
     val status = cli.run(args)
     Result(status, out.toVector, errors.toVector)
 
@@ -61,7 +78,7 @@ class SkaterStatisticsSuite extends munit.FunSuite:
     val source = new CrgJsonGameSource(_ => Right(game))
     val totals = run(source, "game.json")
     assertEquals(totals.status, 0)
-    assertEquals(totals.table.drop(1), Vector(
+    assertEquals(overallRows(totals), Vector(
       Vector("Coyotes", "Iguana", "0", "0m00s", "0"),
       Vector("Coyotes", "Puma", "1", "0m00s", "0"),
       Vector("Coyotes", "#17 Águila", "3", "0m40s (partial)", "2")
@@ -72,11 +89,11 @@ class SkaterStatisticsSuite extends munit.FunSuite:
 
     val jams = run(source, "--by", "jam", "game.json")
     assertEquals(jams.status, 0)
-    assertEquals(jams.table.drop(1), Vector(
-      Vector("1", "1", "Coyotes", "#17 Águila", "1", "0m23s"),
+    assertEquals(overallRows(jams, byJam = true), Vector(
+      Vector("1", "1", "Coyotes", "#17 Águila", "1", "0m23.500s"),
       Vector("1", "2", "Coyotes", "#17 Águila", "0", "0m00s (partial)"),
       Vector("2", "1", "Coyotes", "Puma", "1", "0m00s"),
-      Vector("2", "1", "Coyotes", "#17 Águila", "0", "0m16s")
+      Vector("2", "1", "Coyotes", "#17 Águila", "0", "0m16.500s")
     ))
   }
 
@@ -106,12 +123,12 @@ class SkaterStatisticsSuite extends munit.FunSuite:
     val source = new CrgJsonGameSource(path => exports.get(path).toRight("missing export"))
     val totals = run(source, "--by", "tournament", "one", "copy", "two", "other-team")
     assertEquals(totals.status, 0)
-    assertEquals(totals.table.drop(1), Vector(
+    assertEquals(overallRows(totals), Vector(
       Vector("Coyotes", "Puma [g1/One/local]", "0", "0m00s", "0"),
       Vector("Coyotes", "Puma [g2/One/local]", "0", "0m00s", "0"),
       Vector("Coyotes", "Puma [g3/One/local]", "0", "0m00s", "0"),
       Vector("Coyotes", "Águila", "2", "0m03s", "0"),
-      Vector("Coyotes", "Águila", "1", "0m01s", "0")
+      Vector("Coyotes", "Águila", "1", "0m01.500s", "0")
     ))
     assertEquals(totals.errors.count(_.contains("game-local team or skater IDs")), 3)
 
@@ -175,13 +192,194 @@ class SkaterStatisticsSuite extends munit.FunSuite:
     assertEquals(runCommand(source, args ++ paths.take(1)), result)
   }
 
-  test("real sample reports five penalties and 32m26s for Mexico City All Stars skater 17") {
+  test("real sample preserves milliseconds and reports five penalties for Mexico City All Stars skater 17") {
     val sample = SampleFixtures.path("STATS-2026-11-13_EMEXRDDiscordias_vs_MexicoCityRollerDerbyMexicoCityAllStars.json")
     val totals = run(CrgFileGameSource(), sample)
     assertEquals(totals.status, 0)
-    val skater = totals.table.find(row =>
+    val skater = overallRows(totals).find(row =>
       row.headOption.contains("Mexico City Roller Derby - Mexico City All Stars") &&
         row.lift(1).exists(_.startsWith("#17 "))
     )
-    assertEquals(skater.map(_.drop(2)), Some(Vector("5", "32m26s", "0")))
+    assertEquals(skater.map(_.drop(2)), Some(Vector("5", "32m26.600s", "0")))
+  }
+
+  test("star passes split roles, event penalties and points while retaining uncertain activity overall") {
+    val fields = Vector(
+      "Team(1).Skater(p).Name" -> "\"Pivot\"",
+      "Team(1).Skater(p).Flags" -> "\"\"",
+      "Team(1).Skater(j).Name" -> "\"Original jammer\"",
+      "Team(1).Skater(j).Flags" -> "\"\"",
+      "Team(1).Skater(b).Name" -> "\"Blocker\"",
+      "Team(1).Skater(b).Flags" -> "\"\"",
+      "Team(1).Skater(p).Penalty(1).Jam" -> "\"timed\"",
+      "Team(1).Skater(p).Penalty(1).MVP.OccurredAtElapsedMillis" -> "20000",
+      "Team(1).Skater(p).Penalty(2).Jam" -> "\"timed\"",
+      "Team(1).Skater(p).Penalty(2).MVP.OccurredAtElapsedMillis" -> "50000",
+      "Team(1).Skater(p).Penalty(3).Jam" -> "\"untimed\"",
+      "Team(1).Skater(p).Penalty(3).Time" -> "300000",
+      "Team(1).Skater(p).Penalty(4).Jam" -> "\"untimed\"",
+      "Team(1).Skater(p).Penalty(4).MVP.AfterStarPass" -> "true",
+      "Period(1).Jam(1).Id" -> "\"timed\"",
+      "Period(1).Jam(1).Duration" -> "90000",
+      "Period(1).Jam(1).TeamJam(1).MVP.StarPassElapsedMillis" -> "35000",
+      "Period(1).Jam(1).TeamJam(1).JamScore" -> "9",
+      "Period(1).Jam(1).TeamJam(1).AfterSPScore" -> "6",
+      "Period(1).Jam(1).TeamJam(2).JamScore" -> "5",
+      "Period(1).Jam(1).TeamJam(2).ScoringTrip(1).Score" -> "2",
+      "Period(1).Jam(1).TeamJam(2).ScoringTrip(1).JamClockStart" -> "0",
+      "Period(1).Jam(1).TeamJam(2).ScoringTrip(1).JamClockEnd" -> "30000",
+      "Period(1).Jam(1).TeamJam(2).ScoringTrip(2).Score" -> "3",
+      "Period(1).Jam(1).TeamJam(2).ScoringTrip(2).JamClockStart" -> "40000",
+      "Period(1).Jam(1).TeamJam(2).ScoringTrip(2).JamClockEnd" -> "80000",
+      "Period(1).Jam(2).Id" -> "\"untimed\"",
+      "Period(1).Jam(2).Duration" -> "30000",
+      "Period(1).Jam(2).WalltimeStart" -> "100000",
+      "Period(1).Jam(2).WalltimeEnd" -> "130000",
+      "Period(1).Jam(2).TeamJam(1).JamScore" -> "4",
+      "Period(1).Jam(2).TeamJam(1).AfterSPScore" -> "4"
+    )
+    val lineups = for
+      jam <- Vector(1, 2)
+      (position, skater) <- Vector("Jammer" -> "j", "Pivot" -> "p", "Blocker1" -> "b", "Blocker2" -> "b")
+    yield s"Period(1).Jam($jam).TeamJam(1).Fielding($position).Skater" -> s""""$skater""""
+    val passes = Vector(1, 2).map(jam => s"Period(1).Jam($jam).TeamJam(1).StarPass" -> "true")
+    val source = new CrgJsonGameSource(_ => Right(gameJson("roles", fields ++ lineups ++ passes)))
+
+    val jams = run(source, "--by", "jam", "roles.json")
+    assertEquals(jams.status, 0)
+    def jamMetrics(jam: String, skater: String, role: String): Option[Vector[String]] =
+      jams.table.find(row =>
+        row.lift(1).contains(jam) && row.lift(3).contains(skater) && row.lift(4).contains(role)
+      ).map(_.drop(5))
+    assertEquals(jamMetrics("1", "Pivot", "Pack"), Some(Vector(
+      "1", "0m35s", "1", "1.71", "3", "2", "5.14", "3.43", "—", "—", "—"
+    )))
+    assertEquals(jamMetrics("1", "Pivot", "Jammer"), Some(Vector(
+      "1", "0m55s", "1", "1.09", "6", "3", "6.55", "3.27", "—", "—", "—"
+    )))
+    assertEquals(jamMetrics("1", "Original jammer", "Pack").map(_.take(2)), Some(Vector("1", "0m55s")))
+    assertEquals(jamMetrics("1", "Original jammer", "Jammer").map(_.take(2)), Some(Vector("1", "0m35s")))
+    assertEquals(jamMetrics("2", "Pivot", "All roles").map(_.takeRight(3)), Some(Vector("0", "1", "0m30s")))
+    assertEquals(jamMetrics("2", "Pivot", "Jammer"), Some(Vector(
+      "1", "0m00s (partial)", "1 (partial)", "—", "4", "0 (partial)", "—", "—", "—", "—", "—"
+    )))
+
+    val totals = run(source, "roles.json")
+    val blocker = totals.table.find(row => row.lift(1).contains("Blocker") && row.lift(2).contains("Pack"))
+    assertEquals(blocker.map(_.drop(3).take(8)), Some(Vector(
+      "2", "2m00s", "0", "0.00", "13", "5 (partial)", "6.50", "—"
+    )))
+    val pivot = totals.table.find(row => row.lift(1).contains("Pivot") && row.lift(2).contains("All roles"))
+    assertEquals(pivot.map(_.drop(3).take(4)), Some(Vector("2", "2m00s", "4", "2.00")))
+    assertEquals(pivot.map(_.takeRight(3)), Some(Vector("0", "1", "0m30s")))
+  }
+
+  private lazy val timingGameFields: Vector[(String, String)] =
+    val lineups = for
+      side <- Vector(1, 2)
+      (position, id) <- Vector("Jammer" -> s"j$side", "Pivot" -> s"p$side")
+    yield Vector(
+      s"Team($side).Skater($id).Name" -> s""""$id"""",
+      s"Team($side).Skater($id).Flags" -> "\"\"",
+      s"Period(1).Jam(1).TeamJam($side).Fielding($position).Skater" -> s""""$id"""",
+      s"Period(1).Jam(2).TeamJam($side).Fielding($position).Skater" -> s""""$id""""
+    )
+    lineups.flatten ++ Vector(
+      "Period(1).Jam(1).Id" -> "\"one\"",
+      "Period(1).Jam(1).Duration" -> "90000",
+      "Period(1).Jam(1).StarPass" -> "true",
+      "Period(1).Jam(1).TeamJam(1).StarPassTrip" -> "\"trip-own\"",
+      "Period(1).Jam(1).TeamJam(1).ScoringTrip(1).Id" -> "\"trip-own\"",
+      "Period(1).Jam(1).TeamJam(2).StarPass" -> "false",
+      "Period(1).Jam(2).Id" -> "\"two\"",
+      "Period(1).Jam(2).Duration" -> "90000",
+      "Period(1).Jam(2).TeamJam(1).StarPass" -> "true",
+      "Period(1).Jam(2).TeamJam(1).MVP.StarPassElapsedMillis" -> "20000",
+      "Period(1).Jam(2).TeamJam(2).StarPass" -> "true",
+      "Team(1).Skater(p1).Penalty(1).Jam" -> "\"one\"",
+      "Team(2).Skater(p2).Penalty(1).Jam" -> "\"two\""
+    )
+
+  test("verified timing file splits each team's pass independently and preserves the other team's full jam") {
+    val source = new CrgJsonGameSource(_ => Right(gameJson("g", timingGameFields)))
+    val timing = Vector(
+      "# timings verified from video",
+      "star-pass\tg\t1\t1\t1\t35000",
+      "star-pass\tg\t1\t2\t1\t20000",
+      "star-pass\tg\t1\t2\t2\t70000",
+      "penalty\tg\t1\t1\t1\tp1\t1\t50000\t-",
+      "penalty\tg\t1\t2\t2\tp2\t1\t-\tbefore"
+    ).mkString("\n")
+    val report = runCommand(source, Vector("skater-stats", "--event-timings", "times.tsv", "--by", "jam", "game.json"),
+      _ => Right(timing))
+    assertEquals(report.status, 0)
+    assertEquals(report.errors, Vector.empty)
+    assertEquals(report.lines.lastOption, Some("Star-pass timing: 3 of 3 team passes verified · 0m00s unattributed skater time"))
+    def row(jam: String, skater: String, role: String): Option[Vector[String]] =
+      report.table.find(cells => cells.lift(1).contains(jam) && cells.lift(3).contains(skater) && cells.lift(4).contains(role))
+        .map(_.slice(5, 8))
+    assertEquals(row("1", "p1", "Pack"), Some(Vector("1", "0m35s", "0")))
+    assertEquals(row("1", "p1", "Jammer"), Some(Vector("1", "0m55s", "1")))
+    assertEquals(row("1", "p1", "All roles"), Some(Vector("1", "1m30s", "1")))
+    assertEquals(row("1", "p2", "Pack"), Some(Vector("1", "1m30s", "0")))
+    assertEquals(row("1", "p2", "Jammer"), None)
+    assertEquals(row("1", "j2", "Jammer"), Some(Vector("1", "1m30s", "0")))
+    assertEquals(row("2", "p1", "Pack"), Some(Vector("1", "0m20s", "0")))
+    assertEquals(row("2", "p2", "Pack"), Some(Vector("1", "1m10s", "1")))
+    assertEquals(row("2", "p2", "Jammer"), Some(Vector("1", "0m20s", "0")))
+
+    val withoutTimings = run(source, "--by", "jam", "game.json")
+    assertEquals(withoutTimings.lines.lastOption, Some("Star-pass timing: 1 of 3 team passes verified · 6m00s unattributed skater time"))
+  }
+
+  test("timing files report conflicting sources, bad times and invalid references by line") {
+    val source = new CrgJsonGameSource(_ => Right(gameJson("g", timingGameFields)))
+    val args = Vector("skater-stats", "--event-timings", "times.tsv", "game.json")
+    val timing = Vector(
+      "star-pass\tg\t1\t1\t2\t35000",
+      "star-pass\tg\t1\t2\t1\t25000",
+      "star-pass\tg\t1\t2\t2\t90000",
+      "star-pass\tg\t1\t3\t1\t25000",
+      "penalty\tg\t1\t2\t1\tp1\t1\t25000\t-",
+      "penalty\tg\t1\t2\t2\tp2\t2\t-\tbefore"
+    ).mkString("\n")
+    val report = runCommand(source, args, _ => Right(timing))
+    assertEquals(report.status, 1)
+    assertEquals(report.lines, Vector.empty)
+    assertEquals(report.errors, Vector(
+      "times.tsv: line 1: star-pass timing conflicts with team pass evidence",
+      "times.tsv: line 2: star-pass time conflicts with the embedded verified time",
+      "times.tsv: line 3: star-pass time must be inside a jam with a recorded duration",
+      "times.tsv: line 4: star pass refers to an unknown game, period, jam, or side",
+      "times.tsv: line 5: penalty does not link to the specified period and jam",
+      "times.tsv: line 6: penalty refers to an unknown game, side, skater, or penalty number"
+    ))
+    assertEquals(runCommand(source, args).errors, Vector("times.tsv: missing timing file"))
+    val inconsistentOrder = runCommand(source, args, _ =>
+      Right("penalty\tg\t1\t2\t2\tp2\t1\t10000\tafter\nstar-pass\tg\t1\t2\t2\t70000")
+    )
+    assertEquals(inconsistentOrder.errors, Vector(
+      "times.tsv: line 1: verified penalty order conflicts with the pass and penalty times"
+    ))
+    val duplicate = runCommand(source, args, _ =>
+      Right("star-pass\tg\t1\t1\t1\t35000\nstar-pass\tg\t1\t1\t1\t36000")
+    )
+    assertEquals(duplicate.errors, Vector("times.tsv: line 1: conflicting entries for the same event"))
+  }
+
+  test("conflicting team-specific pass evidence leaves only the affected team's switch uncertain") {
+    val conflicts = Vector(
+      "Period(1).Jam(1).TeamJam(1).StarPass" -> "false",
+      "Period(1).Jam(1).TeamJam(1).ScoringTrip(1).AfterSP" -> "true"
+    )
+    val source = new CrgJsonGameSource(_ => Right(gameJson("g", timingGameFields ++ conflicts)))
+    val report = run(source, "--by", "jam", "game.json")
+    assertEquals(report.status, 0)
+    assertEquals(report.errors, Vector("game.json: game g: period 1, jam 1, side 1: team StarPass is false but team evidence records a pass"))
+    val rows = report.table.filter(_.lift(1).contains("1"))
+    val pivot = rows.filter(_.lift(3).contains("p1"))
+    assertEquals(pivot.flatMap(_.lift(4)), Vector("All roles"))
+    assertEquals(pivot.flatMap(_.lift(15)), Vector("1m30s"))
+    assert(rows.exists(row => row.lift(3).contains("p2") && row.lift(4).contains("Pack") &&
+      row.lift(6).contains("1m30s")))
   }
