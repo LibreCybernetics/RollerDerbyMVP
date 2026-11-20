@@ -23,5 +23,6 @@ The reader imports the flat `state` object in CRG ScoreBoard exports. It reads g
 
 ## Source layout
 
-- `cli/shared` contains the domain model, import use case and ports, CLI behavior, and CRG decoder.
-- `cli/jvm` and `cli/js` provide platform entry points and UTF-8 file access.
+- `core/shared` contains the domain model, import interfaces, and import service.
+- `crg-import/shared` decodes CRG JSON exports. `crg-import/jvm` and `crg-import/js` provide UTF-8 file access.
+- `cli/shared` handles commands and formats results. `cli/jvm` and `cli/js` provide the platform entry points.
