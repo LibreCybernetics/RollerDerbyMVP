@@ -16,7 +16,7 @@ final case class GameRoster private (entries: Vector[GameRosterEntry]):
     val outsideCharter = entries.filterNot(entry => charterIds.contains(entry.skaterId))
     if outsideCharter.isEmpty then Right(this)
     else
-      val ids = outsideCharter.map(_.gameSkaterId.value).mkString(", ")
+      val ids = outsideCharter.map(_.gameSkaterId.sourceId.value).mkString(", ")
       Left(s"game roster contains skaters outside the charter ($ids)")
 
 object GameRoster:

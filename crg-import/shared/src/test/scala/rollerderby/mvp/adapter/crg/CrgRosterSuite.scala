@@ -4,9 +4,16 @@ import rollerderby.mvp.SampleFixtures
 import rollerderby.mvp.application.ImportGamesService
 import rollerderby.mvp.domain.*
 
+import java.util.UUID
+
 class CrgRosterSuite extends munit.FunSuite:
+  private val tournamentId = TournamentId(UUID.fromString("db91f93a-4ce4-4305-8b89-256194e35a60").nn)
+  private val sideId = GameSideId(GameId(ExternalId.Opaque("g")), Side.One)
+
+  private def skaterId(token: String): GameSkaterId = GameSkaterId(sideId, ExternalId.Opaque(token))
+
   private val charterEntries = (1 to 21).toVector.map { number =>
-    CharterRosterEntry(Skater(SkaterId.External(s"skater-$number"), None), Some(number.toString))
+    CharterRosterEntry(Skater(SkaterId.External(ExternalId.Opaque(s"skater-$number")), None), Some(number.toString))
   }
 
   test("rosters validate limits, duplicate identities, and charter membership") {
@@ -16,7 +23,7 @@ class CrgRosterSuite extends munit.FunSuite:
     assert(CharterRoster.create(charterEntries.take(1) ++ charterEntries.take(1)).isLeft)
 
     val entries = charterEntries.map { entry =>
-      GameRosterEntry(GameSkaterId(entry.rosterNumber.getOrElse(fail("expected roster number"))),
+      GameRosterEntry(skaterId(entry.rosterNumber.getOrElse(fail("expected roster number"))),
         entry.skater.id, entry.rosterNumber)
     }
     assert(GameRoster.create(entries.take(15), Some(charter)).isRight)
@@ -36,11 +43,11 @@ class CrgRosterSuite extends munit.FunSuite:
       """)
     val side = sideOne(game)
     val roster = side.roster.fold(issues => fail(issues.mkString(", ")), identity)
-    assertEquals(roster.entries.map(_.gameSkaterId.value), Vector("s1", "s2"))
+    assertEquals(roster.entries.map(_.gameSkaterId.sourceId.value), Vector("s1", "s2"))
     assertEquals(roster.entries.map(_.captaincy), Vector(None, Some(Captaincy.AlternateCaptain)))
-    assertEquals(side.listedSkaters.map(_.id.value), Vector("s1", "s2", "s3"))
-    assertEquals(side.teamId, TeamId.GameLocal("g", Side.One))
-    assertEquals(roster.entries.headOption.map(_.skaterId), Some(SkaterId.GameLocal("g", Side.One, GameSkaterId("s1"))))
+    assertEquals(side.listedSkaters.map(_.id.sourceId.value), Vector("s1", "s2", "s3"))
+    assertEquals(side.teamId, TeamId.GameLocal(sideId))
+    assertEquals(roster.entries.headOption.map(_.skaterId), Some(SkaterId.GameLocal(skaterId("s1"))))
   }
 
   test("missing flags and contradictory fieldings report roster issues while preserving game data") {
@@ -56,16 +63,16 @@ class CrgRosterSuite extends munit.FunSuite:
     val side = sideOne(contradiction)
     assert(side.roster.left.toOption.exists(_.exists(_.contains("fieldings reference skaters outside the game roster (s)"))))
     assertEquals(side.score, 12)
-    assertEquals(side.penalties.map(_.skaterId), Vector(GameSkaterId("s")))
-    assertEquals(contradiction.jams.flatMap(_.teams).flatMap(_.fieldings).flatMap(_.skaterId), Vector(GameSkaterId("s")))
+    assertEquals(side.penalties.map(_.skaterId), Vector(skaterId("s")))
+    assertEquals(contradiction.jams.flatMap(_.teams).flatMap(_.fieldings).flatMap(_.skater).flatMap(_.resolved), Vector(skaterId("s")))
   }
 
   test("explicit tournament grouping resolves prepared identities and checks supplied charters") {
     val paths = SampleFixtures.filenames.map(SampleFixtures.path)
     val service = new ImportGamesService(CrgFileGameSource())
-    val tournament = service.importTournament("event", "November tournament", paths)
+    val tournament = service.importTournament(tournamentId, "November tournament", paths)
       .fold(issues => fail(issues.mkString(", ")), identity)
-    assertEquals(tournament.id, "event")
+    assertEquals(tournament.id, tournamentId)
     assertEquals(tournament.games.size, 14)
     assertEquals(tournament.teams.size, 11)
     assert(tournament.teams.forall(_.charter.isEmpty))
@@ -75,19 +82,19 @@ class CrgRosterSuite extends munit.FunSuite:
     val sameTeam = tournament.games.flatMap(_.sides).filter(_.teamId == firstSide.teamId)
     assert(sameTeam.size > 1)
     assertEquals(sameTeam.map(_.listedSkaters.map(_.skater.id).toSet).distinct.size, 1)
-    assert(sameTeam.map(_.listedSkaters.map(_.id).toSet).distinct.size > 1)
+    assert(sameTeam.map(_.listedSkaters.map(_.id.sourceId).toSet).distinct.size > 1)
 
     val entries = firstSide.listedSkaters.map(entry => CharterRosterEntry(entry.skater, entry.rosterNumber))
     val charter = CharterRoster.create(entries).fold(error => fail(error), identity)
-    val duplicate = Tournament.assemble("event", "November tournament", Vector(first, first), Map(firstSide.teamId -> charter))
+    val duplicate = Tournament.assemble(tournamentId, "November tournament", Vector(first, first), Map(firstSide.teamId -> charter))
       .fold(issues => fail(issues.mkString(", ")), identity)
     assertEquals(duplicate.games.size, 1)
     assert(duplicate.teams.exists(team => team.id == firstSide.teamId && team.charter.contains(charter)))
     val conflicting = first.copy(name = Some("Another game name"))
-    assert(Tournament.assemble("event", "November tournament", Vector(first, conflicting)).isLeft)
+    assert(Tournament.assemble(tournamentId, "November tournament", Vector(first, conflicting)).isLeft)
 
     val emptyCharter = CharterRoster.create(Vector.empty).fold(error => fail(error), identity)
-    val rejected = Tournament.assemble("event", "November tournament", Vector(first), Map(firstSide.teamId -> emptyCharter))
+    val rejected = Tournament.assemble(tournamentId, "November tournament", Vector(first), Map(firstSide.teamId -> emptyCharter))
     assert(rejected.left.toOption.exists(_.exists(_.contains("outside the charter"))))
   }
 

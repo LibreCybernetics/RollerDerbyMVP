@@ -3,19 +3,24 @@ package rollerderby.mvp.domain
 import java.time.{Duration, Instant}
 
 final case class Penalty(
-    skaterId: GameSkaterId,
-    number: Int,
-    id: Option[String],
-    jamId: Option[String],
-    boxTripId: Option[String],
+    key: PenaltyKey,
+    id: Option[PenaltyId],
+    jam: Option[EntityReference[JamKey]],
+    boxTrip: Option[EntityReference[BoxTripId]],
     enteredAt: Option[Instant]
-)
+):
+  def skaterId: GameSkaterId = key.skaterId
+  def number: Int = key.number
+
+final case class PenaltyKey(skaterId: GameSkaterId, number: Int) derives CanEqual
+final case class PenaltyId(sourceId: ExternalId) extends AnyVal derives CanEqual
+final case class BoxTripId(sourceId: ExternalId) extends AnyVal derives CanEqual
 
 final case class BoxTrip(
-    id: String,
-    currentSkaterId: Option[GameSkaterId],
-    startFieldingId: Option[String],
-    endFieldingId: Option[String],
+    id: BoxTripId,
+    currentSkater: Option[EntityReference[GameSkaterId]],
+    startFielding: Option[EntityReference[FieldingId]],
+    endFielding: Option[EntityReference[FieldingId]],
     wallTimeStart: Option[Instant],
     wallTimeEnd: Option[Instant],
     jamClockStart: Option[ClockReading],

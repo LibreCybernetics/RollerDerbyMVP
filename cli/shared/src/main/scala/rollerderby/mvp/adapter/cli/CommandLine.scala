@@ -20,7 +20,8 @@ final class CommandLine(
         case Right(imported) =>
           imported.games.foreach { game =>
             printOut(summary(imported.path, game))
-            game.sides.flatMap(_.roster.left.toOption.toVector.flatten).foreach { issue =>
+            val rosterIssues = game.sides.flatMap(_.roster.left.toOption.toVector.flatten)
+            (rosterIssues ++ game.referenceIssues).foreach { issue =>
               printError(s"${imported.path}: $issue")
             }
           }
@@ -32,7 +33,7 @@ final class CommandLine(
       2
 
   private def summary(path: String, game: Game): String =
-    val name = game.name.fold(game.id)(name => s"$name [${game.id}]")
+    val name = game.name.fold(game.id.value)(name => s"$name [${game.id.value}]")
     val teams = game.sides.map { side =>
       val roster = side.roster.fold(_ => "game roster unavailable", value => s"${value.entries.size} on game roster")
       s"${side.name} ${side.score} ($roster)"

@@ -1,6 +1,6 @@
 package rollerderby.mvp.adapter.crg
 
-import rollerderby.mvp.domain.{Captaincy, Fielding, GameSkaterId, SkaterId, TeamId}
+import rollerderby.mvp.domain.*
 
 class CrgJsonSuite extends munit.FunSuite:
   private val fixture = """
@@ -36,16 +36,16 @@ class CrgJsonSuite extends munit.FunSuite:
 
   test("decodes CRG identifiers, roster and jam stats in numeric jam order") {
     val Vector(game) = CrgJson.decode(fixture).fold(error => fail(error), identity): @unchecked
-    assertEquals(game.id, "g1")
+    assertEquals(game.id, GameId(ExternalId.Opaque("g1")))
     assertEquals(game.officialScore, Some(true))
     val team = game.sides.headOption.getOrElse(fail("expected a team"))
     assertEquals(team.name, "League A - Coyotes")
-    assertEquals(team.teamId, TeamId.External("team-a"))
+    assertEquals(team.teamId, TeamId.External(ExternalId.Opaque("team-a")))
     assertEquals(team.score, 12)
     val skater = team.listedSkaters.headOption.getOrElse(fail("expected a skater"))
     assertEquals(skater.skater.name, Some("Águila"))
     assertEquals(skater.rosterNumber, Some("01"))
-    assertEquals(skater.skater.id, SkaterId.External("skater-a"))
+    assertEquals(skater.skater.id, SkaterId.External(ExternalId.Opaque("skater-a")))
     assertEquals(skater.penaltyCount, Some(1))
     val roster = team.roster.fold(issues => fail(issues.mkString(", ")), identity)
     assertEquals(roster.entries.map(_.captaincy), Vector(Some(Captaincy.Captain)))
@@ -53,7 +53,8 @@ class CrgJsonSuite extends munit.FunSuite:
     val jamTeam = game.jams.headOption.flatMap(_.teams.headOption).getOrElse(fail("expected a jam team"))
     assertEquals(jamTeam.score, Some(5))
     assertEquals(jamTeam.lead, Some(true))
-    assertEquals(jamTeam.fieldings, Vector(Fielding("Jammer", Some(GameSkaterId("s1")), None), Fielding("Pivot", None, None)))
+    assertEquals(jamTeam.fieldings.map(_.id.position), Vector(FieldingPosition.Jammer, FieldingPosition.Pivot))
+    assertEquals(jamTeam.fieldings.map(_.skater.flatMap(_.resolved)), Vector(Some(skater.id), None))
     assertEquals(jamTeam.trips.map(_.score), Vector(Some(5)))
     assertEquals(jamTeam.trips.map(_.afterStarPass), Vector(Some(false)))
   }
@@ -64,7 +65,7 @@ class CrgJsonSuite extends munit.FunSuite:
       "ScoreBoard.Game(a).Team(1).Score":0,"ScoreBoard.Game(a).Team(2).Score":0,
       "ScoreBoard.Team(1).Name":"current game alias"
     }}"""
-    assertEquals(CrgJson.decode(json).map(_.map(_.id)), Right(Vector("a", "b")))
+    assertEquals(CrgJson.decode(json).map(_.map(_.id.value)), Right(Vector("a", "b")))
   }
 
   test("reports malformed JSON and missing required game fields") {

@@ -3,17 +3,21 @@ package rollerderby.mvp.domain
 import java.time.{Duration, Instant}
 
 final case class Jam(
-    period: Int,
-    number: Int,
+    key: JamKey,
     teams: Vector[JamTeam],
-    id: Option[String] = None,
+    id: Option[JamId] = None,
     wallTimeStart: Option[Instant] = None,
     wallTimeEnd: Option[Instant] = None,
     duration: Option[Duration] = None,
     periodClockElapsedStart: Option[ClockReading] = None,
     periodClockElapsedEnd: Option[ClockReading] = None,
     periodClockDisplayEnd: Option[ClockReading] = None
-)
+):
+  def period: Int = key.period.number
+  def number: Int = key.number
+
+final case class JamKey(period: PeriodKey, number: Int) derives CanEqual
+final case class JamId(sourceId: ExternalId) extends AnyVal derives CanEqual
 
 final case class JamTeam(
     side: Side,
@@ -24,13 +28,21 @@ final case class JamTeam(
 )
 
 final case class ScoringTrip(
-    number: Int,
+    key: ScoringTripKey,
     score: Option[Int],
     afterStarPass: Option[Boolean],
     jamClockStart: Option[ClockReading] = None,
     jamClockEnd: Option[ClockReading] = None,
     duration: Option[Duration] = None
-)
+):
+  def number: Int = key.number
 
+final case class ScoringTripKey(jam: JamKey, side: Side, number: Int) derives CanEqual
 
-final case class Fielding(position: String, skaterId: Option[GameSkaterId], id: Option[String])
+final case class Fielding(id: FieldingId, skater: Option[EntityReference[GameSkaterId]])
+
+final case class FieldingId(jam: JamKey, side: Side, position: FieldingPosition) derives CanEqual
+
+enum FieldingPosition derives CanEqual:
+  case Jammer, Pivot, Blocker1, Blocker2, Blocker3
+  case Other(name: String)

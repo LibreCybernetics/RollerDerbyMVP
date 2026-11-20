@@ -24,21 +24,29 @@ object CrgDomainMapper:
     catch
       case error: InvalidField => Left(error.message)
 
-  private def game(id: String, fields: Fields): Game =
+  private def game(sourceId: String, fields: Fields): Game =
+    val id = GameId(ExternalId.fromString(sourceId))
     val teams = Map.from(fields.children("Team"))
-    // CRG uses period zero for its pregame placeholder jam.
-    val periods = fields.numberedChildren("Period").collect { case (number, data) if number > 0 =>
-      period(number, data)
-    }
-    val sides = Vector("1" -> Side.One, "2" -> Side.Two).map { case (key, side) =>
+    val sidesWithFields = Vector("1" -> Side.One, "2" -> Side.Two).map { case (key, side) =>
       val teamFields = teams.getOrElse(key, invalid(s"${fields.path}.Team($key): missing team"))
-      val fielded = periods.iterator.flatMap(_.jams).flatMap(_.teams).filter(_.side == side)
-        .flatMap(_.fieldings).flatMap(_.skaterId).toSet
-      gameSide(id, side, key, teamFields, fielded)
+      SideFields(GameSideId(id, side), key, teamFields.children("Skater"), teamFields.children("BoxTrip"), teamFields)
+    }
+    // CRG uses period zero for its pregame placeholder jam.
+    val periodSources = fields.numberedChildren("Period").collect { case (number, data) if number > 0 =>
+      val key = PeriodKey(id, number)
+      val jams = data.numberedChildren("Jam").map { case (number, jam) => JamKey(key, number) -> jam }
+      PeriodFields(key, jams, data)
+    }
+    val references = new References(periodSources, sidesWithFields)
+    val periods = periodSources.map(period(_, references))
+    val sides = sidesWithFields.map { source =>
+      val fielded = periods.iterator.flatMap(_.jams).flatMap(_.teams).filter(_.side == source.id.side)
+        .flatMap(_.fieldings).flatMap(_.skater).toVector
+      gameSide(source, fielded, references)
     }
     val clocks = fields.children("Clock").map { case (name, clock) =>
       ClockSnapshot(
-        id = name,
+        id = ClockId(id, clockKind(name)),
         time = clock.clock("Time"),
         invertedTime = clock.clock("InvertedTime"),
         maximumTime = clock.duration("MaximumTime"),
@@ -55,17 +63,19 @@ object CrgDomainMapper:
       eventDate = fields.calendarTime("EventInfo(Date)", "an ISO local date")(value => LocalDate.parse(value).nn),
       eventStartTime = fields.calendarTime("EventInfo(StartTime)", "an ISO local time")(value => LocalTime.parse(value).nn),
       clocks = clocks,
-      tournamentName = fields.nonEmptyText("EventInfo(Tournament)")
+      tournamentName = fields.nonEmptyText("EventInfo(Tournament)"),
+      referenceIssues = references.issues
     )
 
-  private def period(number: Int, fields: Fields): Period =
-    val jams = fields.numberedChildren("Jam").map { case (jamNumber, data) =>
-      jam(number, jamNumber, data)
+  private def period(source: PeriodFields, references: References): Period =
+    val fields = source.fields
+    val jams = source.jams.map { case (key, data) =>
+      jam(key, data, references)
     }
     val timeouts = fields.children("Timeout").map { case (id, timeout) =>
       Timeout(
-        id = id,
-        precedingJamId = timeout.nonEmptyText("PrecedingJam"),
+        id = if id == "noTimeout" then TimeoutId.Placeholder(source.key) else TimeoutId.External(ExternalId.fromString(id)),
+        precedingJam = references.jam(timeout, "PrecedingJam"),
         wallTimeStart = timeout.wallTime("WalltimeStart"),
         wallTimeEnd = timeout.wallTime("WalltimeEnd"),
         duration = timeout.duration("Duration"),
@@ -78,7 +88,7 @@ object CrgDomainMapper:
       ZonedDateTime.parse(value).nn
     }
     Period(
-      number = number,
+      key = source.key,
       jams = jams,
       timeouts = timeouts,
       wallTimeStart = fields.wallTime("WalltimeStart"),
@@ -87,18 +97,13 @@ object CrgDomainMapper:
       duration = fields.duration("Duration")
     )
 
-  private def jam(period: Int, number: Int, fields: Fields): Jam =
+  private def jam(key: JamKey, fields: Fields, references: References): Jam =
     Jam(
-      period = period,
-      number = number,
-      teams = fields.children("TeamJam").map { case (key, data) =>
-        val side = key match
-          case "1" => Side.One
-          case "2" => Side.Two
-          case _   => invalid(s"${data.path}: expected game side 1 or 2")
-        jamTeam(side, data)
+      key = key,
+      teams = fields.children("TeamJam").map { case (token, data) =>
+        jamTeam(key, gameSideKey(token, data), data, references)
       },
-      id = fields.nonEmptyText("Id"),
+      id = fields.nonEmptyText("Id").map(token => JamId(ExternalId.fromString(token))),
       wallTimeStart = fields.wallTime("WalltimeStart"),
       wallTimeEnd = fields.wallTime("WalltimeEnd"),
       duration = fields.duration("Duration"),
@@ -108,18 +113,17 @@ object CrgDomainMapper:
     )
 
   private def gameSide(
-      gameId: String,
-      side: Side,
-      key: String,
-      fields: Fields,
-      fielded: Set[GameSkaterId]
+      source: SideFields,
+      fielded: Vector[EntityReference[GameSkaterId]],
+      references: References
   ): GameSide =
-    val teamId = fields.nonEmptyText("PreparedTeam").map(TeamId.External.apply)
-      .getOrElse(TeamId.GameLocal(gameId, side))
-    val skaters = fields.children("Skater").map { case (localId, data) =>
-      val id = GameSkaterId(localId)
-      val skaterId = data.nonEmptyText("PreparedSkater").map(SkaterId.External.apply)
-        .getOrElse(SkaterId.GameLocal(gameId, side, id))
+    val fields = source.fields
+    val teamId = fields.nonEmptyText("PreparedTeam").map(token => TeamId.External(ExternalId.fromString(token)))
+      .getOrElse(TeamId.GameLocal(source.id))
+    val skaters = source.skaters.map { case (localId, data) =>
+      val id = GameSkaterId(source.id, ExternalId.fromString(localId))
+      val skaterId = data.nonEmptyText("PreparedSkater").map(token => SkaterId.External(ExternalId.fromString(token)))
+        .getOrElse(SkaterId.GameLocal(id))
       val skater = GameSkater(
         id = id,
         skater = Skater(skaterId, data.text("Name")),
@@ -127,7 +131,7 @@ object CrgDomainMapper:
         penaltyCount = data.integer("PenaltyCount"),
         extraPenaltyTime = data.duration("ExtraPenaltyTime")
       )
-      ListedSkater(skater, data.selection, penalties(id, data))
+      ListedSkater(skater, data.selection, penalties(id, data, references))
     }
     val selectionIssues = skaters.flatMap(_.selection.left.toOption)
     val roster =
@@ -137,19 +141,23 @@ object CrgDomainMapper:
           GameRosterEntry(skater.id, skater.skater.id, skater.rosterNumber, captaincy)
         }
         GameRoster.create(entries).left.map(issue => Vector(s"${fields.path}: $issue")).flatMap { roster =>
-          val unselected = fielded.diff(entries.iterator.map(_.gameSkaterId).toSet)
+          val selected = entries.iterator.map(_.gameSkaterId).toSet
+          val unselected = fielded.collect {
+            case EntityReference.Resolved(id) if !selected.contains(id) => id.sourceId.value
+            case EntityReference.Unresolved(token) => token
+          }.distinct.sorted
           if unselected.isEmpty then Right(roster)
           else
-            val ids = unselected.iterator.map(_.value).toVector.sorted.mkString(", ")
+            val ids = unselected.mkString(", ")
             Left(Vector(s"${fields.path}: jam fieldings reference skaters outside the game roster ($ids)"))
         }
 
-    val boxTrips = fields.children("BoxTrip").map { case (tripId, trip) =>
+    val boxTrips = source.boxTrips.map { case (tripId, trip) =>
       BoxTrip(
-        id = tripId,
-        currentSkaterId = trip.nonEmptyText("CurrentSkater").map(GameSkaterId.apply),
-        startFieldingId = trip.nonEmptyText("StartFielding"),
-        endFieldingId = trip.nonEmptyText("EndFielding"),
+        id = BoxTripId(ExternalId.fromString(tripId)),
+        currentSkater = references.skater(source.id.side, trip, "CurrentSkater"),
+        startFielding = references.fielding(source.id.side, trip, "StartFielding"),
+        endFielding = references.fielding(source.id.side, trip, "EndFielding"),
         wallTimeStart = trip.wallTime("WalltimeStart"),
         wallTimeEnd = trip.wallTime("WalltimeEnd"),
         jamClockStart = trip.clock("JamClockStart"),
@@ -158,9 +166,9 @@ object CrgDomainMapper:
         clockTime = trip.clock("Time")
       )
     }
-    val name = fields.nonEmptyText("FullName").orElse(fields.nonEmptyText("Name")).getOrElse(s"Team $key")
+    val name = fields.nonEmptyText("FullName").orElse(fields.nonEmptyText("Name")).getOrElse(s"Team ${source.token}")
     GameSide(
-      side = side,
+      id = source.id,
       teamId = teamId,
       name = name,
       score = fields.requiredInt("Score"),
@@ -170,25 +178,24 @@ object CrgDomainMapper:
       boxTrips = boxTrips
     )
 
-  private def penalties(id: GameSkaterId, fields: Fields): Vector[Penalty] =
+  private def penalties(id: GameSkaterId, fields: Fields, references: References): Vector[Penalty] =
     fields.numberedChildren("Penalty").map { case (number, penalty) =>
       Penalty(
-        skaterId = id,
-        number = number,
-        id = penalty.nonEmptyText("Id"),
-        jamId = penalty.nonEmptyText("Jam"),
-        boxTripId = penalty.nonEmptyText("BoxTrip"),
+        key = PenaltyKey(id, number),
+        id = penalty.nonEmptyText("Id").map(token => PenaltyId(ExternalId.fromString(token))),
+        jam = references.jam(penalty, "Jam"),
+        boxTrip = references.boxTrip(id.side.side, penalty, "BoxTrip"),
         enteredAt = penalty.instant("Time")
       )
     }
 
-  private def jamTeam(side: Side, fields: Fields): JamTeam =
+  private def jamTeam(key: JamKey, side: Side, fields: Fields, references: References): JamTeam =
     val fieldings = fields.children("Fielding").map { case (position, fielding) =>
-      Fielding(position, fielding.nonEmptyText("Skater").map(GameSkaterId.apply), fielding.nonEmptyText("Id"))
+      Fielding(FieldingId(key, side, fieldingPosition(position)), references.skater(side, fielding, "Skater"))
     }
     val trips = fields.numberedChildren("ScoringTrip").map { case (number, trip) =>
       ScoringTrip(
-        number = number,
+        key = ScoringTripKey(key, side, number),
         score = trip.integer("Score"),
         afterStarPass = trip.boolean("AfterSP"),
         jamClockStart = trip.clock("JamClockStart"),
@@ -197,6 +204,93 @@ object CrgDomainMapper:
       )
     }
     JamTeam(side, fields.integer("JamScore"), fields.boolean("Lead"), fieldings, trips)
+
+  private def gameSideKey(token: String, fields: Fields): Side = token match
+    case "1" => Side.One
+    case "2" => Side.Two
+    case _   => invalid(s"${fields.path}: expected game side 1 or 2")
+
+  private def clockKind(name: String): ClockKind = name match
+    case "Intermission" => ClockKind.Intermission
+    case "Jam"          => ClockKind.Jam
+    case "Lineup"       => ClockKind.Lineup
+    case "Period"       => ClockKind.Period
+    case "Timeout"      => ClockKind.Timeout
+    case other          => ClockKind.Other(other)
+
+  private def fieldingPosition(name: String): FieldingPosition = name match
+    case "Jammer"   => FieldingPosition.Jammer
+    case "Pivot"    => FieldingPosition.Pivot
+    case "Blocker1" => FieldingPosition.Blocker1
+    case "Blocker2" => FieldingPosition.Blocker2
+    case "Blocker3" => FieldingPosition.Blocker3
+    case other      => FieldingPosition.Other(other)
+
+  private final case class PeriodFields(key: PeriodKey, jams: Vector[(JamKey, Fields)], fields: Fields)
+
+  private final case class SideFields(
+      id: GameSideId,
+      token: String,
+      skaters: Vector[(String, Fields)],
+      boxTrips: Vector[(String, Fields)],
+      fields: Fields
+  )
+
+  private final class References(periods: Vector[PeriodFields], sides: Vector[SideFields]):
+    private val problems = Vector.newBuilder[String]
+    private val jams = periods.flatMap(_.jams)
+    private val jamIds = jams.flatMap { case (key, fields) =>
+      fields.nonEmptyText("Id").map(_ -> key)
+    }.groupMap(_._1)(_._2)
+    private val fieldingIds = (for
+      (key, jam) <- jams
+      (side, team) <- jam.children("TeamJam")
+      (position, fielding) <- team.children("Fielding")
+      alias <- fielding.nonEmptyText("Id")
+    yield
+      val sideKey = gameSideKey(side, team)
+      (sideKey -> alias) -> FieldingId(key, sideKey, fieldingPosition(position))
+    ).groupMap(_._1)(_._2)
+    private val skaterIds = (for
+      side <- sides
+      (token, fields) <- side.skaters
+      alias <- aliases(token, fields)
+    yield (side.id.side -> alias) -> GameSkaterId(side.id, ExternalId.fromString(token))).groupMap(_._1)(_._2)
+    private val boxTripIds = (for
+      side <- sides
+      (token, fields) <- side.boxTrips
+      alias <- aliases(token, fields)
+    yield (side.id.side -> alias) -> BoxTripId(ExternalId.fromString(token))).groupMap(_._1)(_._2)
+
+    def issues: Vector[String] = problems.result()
+
+    def jam(fields: Fields, field: String): Option[EntityReference[JamKey]] =
+      resolve(fields, field)(jamIds.get)
+
+    def fielding(side: Side, fields: Fields, field: String): Option[EntityReference[FieldingId]] =
+      resolve(fields, field)(token => fieldingIds.get(side -> token))
+
+    def skater(side: Side, fields: Fields, field: String): Option[EntityReference[GameSkaterId]] =
+      resolve(fields, field)(token => skaterIds.get(side -> token))
+
+    def boxTrip(side: Side, fields: Fields, field: String): Option[EntityReference[BoxTripId]] =
+      resolve(fields, field)(token => boxTripIds.get(side -> token))
+
+    private def aliases(token: String, fields: Fields): Vector[String] =
+      (token +: fields.nonEmptyText("Id").toVector).distinct
+
+    private def resolve[A](
+        fields: Fields,
+        field: String
+    )(lookup: String => Option[Vector[A]]): Option[EntityReference[A]] =
+      fields.nonEmptyText(field).map { token =>
+        lookup(token) match
+          case Some(Vector(id)) => EntityReference.Resolved(id)
+          case matches =>
+            val reason = if matches.isDefined then "ambiguous" else "unresolved"
+            val _ = problems.addOne(s"${fields.path}.$field: $reason reference '$token'")
+            EntityReference.Unresolved(token)
+      }
 
   private enum RosterSelection derives CanEqual:
     case Selected(captaincy: Option[Captaincy])

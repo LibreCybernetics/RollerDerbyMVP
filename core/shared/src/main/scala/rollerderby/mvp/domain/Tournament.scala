@@ -1,7 +1,7 @@
 package rollerderby.mvp.domain
 
 final case class Tournament private (
-    id: String,
+    id: TournamentId,
     name: String,
     teams: Set[Team],
     games: Vector[Game]
@@ -9,14 +9,14 @@ final case class Tournament private (
 
 object Tournament:
   def assemble(
-      id: String,
+      id: TournamentId,
       name: String,
       games: Vector[Game],
       charters: Map[TeamId, CharterRoster] = Map.empty
   ): Either[Vector[String], Tournament] =
     val uniqueGames = games.distinct
     val conflicts = uniqueGames.groupBy(_.id).iterator.collect {
-      case (gameId, copies) if copies.size > 1 => s"conflicting records for game $gameId"
+      case (gameId, copies) if copies.size > 1 => s"conflicting records for game ${gameId.value}"
     }.toVector.sorted
     val charterIssues = for
       game <- uniqueGames
@@ -24,7 +24,7 @@ object Tournament:
       charter <- charters.get(side.teamId).toVector
       roster <- side.roster.toOption.toVector
       issue <- roster.validateAgainst(charter).left.toOption.toVector
-    yield s"game ${game.id}, side ${side.side.toString}: $issue"
+    yield s"game ${game.id.value}, side ${side.side.toString}: $issue"
     val issues = conflicts ++ charterIssues
     if issues.nonEmpty then Left(issues)
     else

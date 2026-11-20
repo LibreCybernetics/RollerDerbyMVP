@@ -1,6 +1,6 @@
 package rollerderby.mvp.application
 
-import rollerderby.mvp.domain.{CharterRoster, Game, TeamId, Tournament}
+import rollerderby.mvp.domain.{CharterRoster, Game, TeamId, Tournament, TournamentId}
 
 final case class ImportError(path: String, detail: String)
 
@@ -17,7 +17,7 @@ final class ImportGamesService(source: GameSource) extends ImportGames:
     paths.map(path => source.load(path).left.map(ImportError(path, _)).map(ImportedGames(path, _)))
 
   def importTournament(
-      id: String,
+      id: TournamentId,
       name: String,
       paths: Vector[String],
       charters: Map[TeamId, CharterRoster] = Map.empty

@@ -1,9 +1,10 @@
 package rollerderby.mvp.adapter.crg
 
 import rollerderby.mvp.SampleFixtures
-import rollerderby.mvp.domain.{Game, Side}
+import rollerderby.mvp.domain.{BoxTripId, ClockKind, ExternalId, FieldingPosition, Game, Side, TimeoutId}
 
 import java.time.{LocalDate, LocalTime, ZoneOffset}
+import java.util.UUID
 
 class CrgSampleSuite extends munit.FunSuite:
   private case class ExpectedGame(
@@ -64,7 +65,9 @@ class CrgSampleSuite extends munit.FunSuite:
   expectedGames.foreach { expected =>
     test(expected.filename) {
       val game = loadGame(expected.filename)
-      assertEquals(game.id, expected.id)
+      assertEquals(game.id.value, expected.id)
+      assertEquals(game.id.sourceId, ExternalId.Uuid(UUID.fromString(expected.id).nn))
+      assertEquals(game.referenceIssues, Vector.empty[String])
       assertEquals(game.officialScore, Some(expected.official))
       assertEquals(game.sides.map(_.side), Vector(Side.One, Side.Two))
       val sides = game.sides.map { side =>
@@ -85,11 +88,11 @@ class CrgSampleSuite extends munit.FunSuite:
     assertEquals(trip.score, Some(3))
     assertEquals(trip.afterStarPass, Some(true))
 
-    val jammerId = jamTeam.fieldings.find(_.position == "Jammer").flatMap(_.skaterId)
+    val jammerId = jamTeam.fieldings.find(_.id.position == FieldingPosition.Jammer).flatMap(_.skater).flatMap(_.resolved)
       .getOrElse(fail("expected a jammer in the lineup"))
     val team = game.sides.find(_.side == jamTeam.side).getOrElse(fail("expected team 1"))
     val jammer = team.listedSkaters.find(_.id == jammerId)
-      .getOrElse(fail(s"jammer ${jammerId.value} missing from team 1 roster"))
+      .getOrElse(fail(s"jammer ${jammerId.sourceId.value} missing from team 1 roster"))
     assertEquals(jammer.rosterNumber, Some("01"))
   }
 
@@ -122,9 +125,9 @@ class CrgSampleSuite extends munit.FunSuite:
     assertEquals(trip.jamClockEnd.map(_.value.toMillis), Some(63200L))
     assertEquals(trip.duration.map(_.toMillis), Some(63200L))
 
-    val timeout = period.timeouts.find(_.id == "27391b68-76f8-4fbd-bf37-3018a06545aa")
+    val timeout = period.timeouts.find(_.id == TimeoutId.External(ExternalId.fromString("27391b68-76f8-4fbd-bf37-3018a06545aa")))
       .getOrElse(fail("expected timeout"))
-    assert(period.jams.exists(jam => jam.id.nonEmpty && jam.id == timeout.precedingJamId))
+    assert(period.jams.exists(jam => timeout.precedingJam.flatMap(_.resolved).contains(jam.key)))
     assertEquals(timeout.wallTimeStart.map(_.toEpochMilli), Some(1794613366096L))
     assertEquals(timeout.wallTimeEnd.map(_.toEpochMilli), Some(1794613448920L))
     assertEquals(timeout.duration.map(_.toMillis), Some(83000L))
@@ -133,23 +136,23 @@ class CrgSampleSuite extends munit.FunSuite:
     assertEquals(timeout.periodClockEnd.map(_.value.toMillis), Some(547200L))
 
     val team = game.sides.find(_.side == Side.One).getOrElse(fail("expected team 1"))
-    val boxTrip = team.boxTrips.find(_.id == "0e2ea502-b4e6-4bd9-a0ce-21070686c9fa")
+    val boxTrip = team.boxTrips.find(_.id == BoxTripId(ExternalId.fromString("0e2ea502-b4e6-4bd9-a0ce-21070686c9fa")))
       .getOrElse(fail("expected box trip"))
-    val fieldingIds = game.jams.flatMap(_.teams).flatMap(_.fieldings).flatMap(_.id).toSet
-    assert(boxTrip.startFieldingId.exists(fieldingIds.contains))
-    assert(boxTrip.endFieldingId.exists(fieldingIds.contains))
+    val fieldingIds = game.jams.flatMap(_.teams).flatMap(_.fieldings).map(_.id).toSet
+    assert(boxTrip.startFielding.flatMap(_.resolved).exists(fieldingIds.contains))
+    assert(boxTrip.endFielding.flatMap(_.resolved).exists(fieldingIds.contains))
     assertEquals(boxTrip.wallTimeStart.map(_.toEpochMilli), Some(1794617184642L))
     assertEquals(boxTrip.wallTimeEnd.map(_.toEpochMilli), Some(1794617283976L))
     assertEquals(boxTrip.jamClockStart.map(_.value.toMillis), Some(0L))
     assertEquals(boxTrip.jamClockEnd.map(_.value.toMillis), Some(44200L))
     assertEquals(boxTrip.duration.map(_.toMillis), Some(23600L))
-    val skater = team.listedSkaters.find(skater => boxTrip.currentSkaterId.contains(skater.id))
+    val skater = team.listedSkaters.find(skater => boxTrip.currentSkater.flatMap(_.resolved).contains(skater.id))
       .getOrElse(fail("expected box trip skater"))
-    val penalty = team.penalties.find(p => p.skaterId == skater.id && p.boxTripId.contains(boxTrip.id))
+    val penalty = team.penalties.find(p => p.skaterId == skater.id && p.boxTrip.flatMap(_.resolved).contains(boxTrip.id))
       .getOrElse(fail("expected penalty"))
     assertEquals(penalty.enteredAt.map(_.toEpochMilli), Some(1794617180874L))
 
-    val clock = game.clocks.find(_.id == "Jam").getOrElse(fail("expected jam clock"))
+    val clock = game.clocks.find(_.id.kind == ClockKind.Jam).getOrElse(fail("expected jam clock"))
     assertEquals(clock.time.map(_.value.toMillis), Some(72000L))
     assertEquals(clock.invertedTime.map(_.value.toMillis), Some(48000L))
     assertEquals(clock.maximumTime.map(_.toMillis), Some(120000L))

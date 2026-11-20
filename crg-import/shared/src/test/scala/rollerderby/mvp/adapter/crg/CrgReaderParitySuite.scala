@@ -41,7 +41,7 @@ class CrgReaderParitySuite extends munit.FunSuite:
     val duplicate = ""","ScoreBoard.Game(g).Team(1).Score":8,"ScoreBoard.Game(g).Name":"Águila 🛼""""
     val json = "\uFEFF" + state(escaped + duplicate)
     sameResult(json)
-    assertEquals(JsoniterCrgJson.decode(json).map(_.map(game => game.id -> game.sides.headOption.map(_.score))),
+    assertEquals(JsoniterCrgJson.decode(json).map(_.map(game => game.id.value -> game.sides.headOption.map(_.score))),
       Right(Vector("g" -> Some(8), "z" -> Some(12))))
     sameResult(s"""{"state":{$scores},"state":null}""")
     sameResult(s"""{"state":null,"state":{$scores}}""")
