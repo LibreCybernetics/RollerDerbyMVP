@@ -8,16 +8,24 @@ class CrgReaderParitySuite extends munit.FunSuite:
   private val scores = """"ScoreBoard.Game(g).Team(1).Score":12,"ScoreBoard.Game(g).Team(2).Score":5"""
 
   SampleFixtures.filenames.foreach { filename =>
-    test(s"readers agree on every game field in $filename") {
+    test(s"readers agree on the raw export and every game field in $filename") {
       val path = SampleFixtures.path(filename)
-      val expected = ujson.load(path).fold(error => fail(error), identity)
-      assertEquals(jsoniter.load(path), Right(expected))
+      val raw = ujson.loadRaw(path).fold(error => fail(error), identity)
+      val otherRaw = jsoniter.loadRaw(path).fold(error => fail(error), identity)
+      assertEquals(otherRaw, raw)
+      val state = raw.root match
+        case CrgValue.ObjectValue(Vector(("state", CrgValue.ObjectValue(members)))) => members.toMap
+        case _ => fail("expected a scoreboard state")
+      assertEquals(state.get("ScoreBoard.Version(release)"), Some(CrgValue.Text("v2027.1")))
+      val games = CrgDomainMapper.toGames(raw).fold(error => fail(error), identity)
+      assertEquals(CrgDomainMapper.toGames(otherRaw), Right(games))
     }
   }
 
   test("both readers reject invalid UTF-8 before decoding") {
     val path = SampleFixtures.invalidUtf8Path
     Seq(ujson, jsoniter).foreach { reader =>
+      assert(reader.loadRaw(path).left.toOption.exists(_.startsWith("cannot read file:")))
       assert(reader.load(path).left.toOption.exists(_.startsWith("cannot read file:")))
     }
   }
@@ -37,6 +45,47 @@ class CrgReaderParitySuite extends munit.FunSuite:
       Right(Vector("g" -> Some(8), "z" -> Some(12))))
     sameResult(s"""{"state":{$scores},"state":null}""")
     sameResult(s"""{"state":null,"state":{$scores}}""")
+  }
+
+  test("raw loading preserves metadata, repeated keys, and exact number tokens before mapping") {
+    import CrgValue.*
+
+    val input =
+      """{"metadata":{"list":[null,true,"03",9007199254740993,-0,1e2147483648],"list":false},"state":{"ScoreBoard.Version(release)":"new"}}"""
+    val expected = CrgExport(ObjectValue(Vector(
+      "metadata" -> ObjectValue(Vector(
+        "list" -> ArrayValue(Vector(
+          NullValue, BooleanValue(true), Text("03"), Number("9007199254740993"), Number("-0"), Number("1e2147483648")
+        )),
+        "list" -> BooleanValue(false)
+      )),
+      "state" -> ObjectValue(Vector("ScoreBoard.Version(release)" -> Text("new")))
+    )))
+    Seq(CrgJson.parse, JsoniterCrgJson.parse).foreach { parse =>
+      val source = new CrgJsonGameSource(_ => Right(input), parse)
+      assertEquals(source.loadRaw("export.json"), Right(expected))
+      assertEquals(source.load("export.json"), Left("state: no ScoreBoard.Game(id) records found"))
+      assertEquals(parse("null"), Right(CrgExport(NullValue)))
+    }
+  }
+
+  test("timing conversion validates the full path and accepts exact 64-bit integers") {
+    val key = "ScoreBoard.Game(g).Period(1).Jam(2).WalltimeStart"
+    Seq(CrgJson.decode, JsoniterCrgJson.decode).foreach { decode =>
+      def readValue(value: String) = decode(state(scores + s""","$key":$value"""))
+
+      val timestamp = readValue("9.007199254740993e15").fold(error => fail(error), identity)
+      assertEquals(timestamp.flatMap(_.jams).map(_.wallTimeStart.map(_.millis)), Vector(Some(9007199254740993L)))
+      val minimum = readValue("-9223372036854775808").fold(error => fail(error), identity)
+      assertEquals(minimum.flatMap(_.jams).map(_.wallTimeStart.map(_.millis)), Vector(Some(Long.MinValue)))
+      val maximum = readValue("9223372036854775807.0").fold(error => fail(error), identity)
+      assertEquals(maximum.flatMap(_.jams).map(_.wallTimeStart.map(_.millis)), Vector(Some(Long.MaxValue)))
+      val unset = readValue("null").fold(error => fail(error), identity)
+      assertEquals(unset.flatMap(_.jams).map(jam => jam.wallTimeStart -> jam.wallTimeEnd), Vector(None -> None))
+      Seq("17.1", "\"17\"", "9223372036854775808", "9223372036854775807.1", "true").foreach { value =>
+        assertEquals(readValue(value), Left(s"state.$key: expected a 64-bit integer"))
+      }
+    }
   }
 
   test("readers agree on numeric coercion and field diagnostics") {
@@ -62,6 +111,8 @@ class CrgReaderParitySuite extends munit.FunSuite:
       state(scores + ""","ignored":"\q""""),
       state(scores + ""","ignored":nulx"""),
       state(scores + ""","ignored":01"""),
+      state(scores + ""","ignored":1e+"""),
+      state(scores + ""","ignored":1."""),
       state(scores + ""","ScoreBoard.Game(g).Unknown":{"key" true}""")
     )
     invalid.foreach { json =>

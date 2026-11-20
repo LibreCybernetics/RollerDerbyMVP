@@ -14,6 +14,7 @@ class CrgSampleSuite extends munit.FunSuite:
   )
 
   private val discordiasFile = "STATS-2026-11-13_EMEXRDDiscordias_vs_MexicoCityRollerDerbyMexicoCityAllStars.json"
+  private val ovejasFile = "STATS-2026-11-14_RollerDerbyMichoacanOvejasNegras_vs_LigaRollerDerbyCiudaddeMexicoQuimeras.json"
 
   // Each side is represented by its recorded score and roster count, in that order.
   private val expectedGames = Vector(
@@ -33,7 +34,7 @@ class CrgSampleSuite extends munit.FunSuite:
       "908b29fd-5afe-4b8a-b38e-5ec5ff65a1ab", (231, 20), (61, 17), 40),
     ExpectedGame("STATS-2026-11-14_MexicoCityRollerDerbyMexicoCityAllStars_vs_RockCityRockCityAllStars.json",
       "2faa64e6-bf88-4efe-900b-ae71dcf3c8bd", (158, 20), (59, 17), 40),
-    ExpectedGame("STATS-2026-11-14_RollerDerbyMichoacanOvejasNegras_vs_LigaRollerDerbyCiudaddeMexicoQuimeras.json",
+    ExpectedGame(ovejasFile,
       "206acbb0-8cf8-4b50-b70c-2ca2fb89c8f4", (57, 12), (174, 17), 42, official = false),
     ExpectedGame("STATS-2026-11-15_EMEXRDDiscordias_vs_JuarezRollerDerbyAllStarJuarez.json",
       "261d7702-fb3e-4771-bbf5-95cc57a303ab", (101, 20), (97, 20), 42),
@@ -82,4 +83,74 @@ class CrgSampleSuite extends munit.FunSuite:
     val team = game.teams.find(_.id == jamTeam.teamId).getOrElse(fail("expected team 1"))
     val jammer = team.skaters.find(_.id == jammerId).getOrElse(fail(s"jammer $jammerId missing from team 1 roster"))
     assertEquals(jammer.rosterNumber, Some("01"))
+  }
+
+  test("Discordias sample maps each kind of timing record") {
+    val game = loadGame(discordiasFile)
+    assertEquals(game.eventDate, Some("2026-11-13"))
+    assertEquals(game.eventStartTime, Some("17:18"))
+    assertEquals(game.periods.map(_.number), Vector(1, 2))
+
+    val period = game.periods.find(_.number == 1).getOrElse(fail("expected period 1"))
+    assertEquals(period.localTimeStart, Some("2026-11-13T17:18:34.050-06:00[America/Mexico_City]"))
+    assertEquals(period.wallTimeStart.map(_.millis), Some(1794611914050L))
+    assertEquals(period.wallTimeEnd.map(_.millis), Some(1794614454997L))
+    assertEquals(period.duration.map(_.millis), Some(2540947L))
+
+    val jam = period.jams.find(_.number == 1).getOrElse(fail("expected jam 1"))
+    assertEquals(jam.wallTimeStart.map(_.millis), Some(1794611914061L))
+    assertEquals(jam.wallTimeEnd.map(_.millis), Some(1794611983954L))
+    assertEquals(jam.duration.map(_.millis), Some(70000L))
+    assertEquals(jam.periodClockElapsedStart.map(_.millis), Some(0L))
+    assertEquals(jam.periodClockElapsedEnd.map(_.millis), Some(70000L))
+    assertEquals(jam.periodClockDisplayEnd.map(_.millis), Some(1730000L))
+
+    val jamTeam = jam.teams.find(_.teamId == "1").getOrElse(fail("expected jam team 1"))
+    val trip = jamTeam.trips.find(_.number == 1).getOrElse(fail("expected scoring trip 1"))
+    assertEquals(trip.jamClockStart.map(_.millis), Some(0L))
+    assertEquals(trip.jamClockEnd.map(_.millis), Some(63200L))
+    assertEquals(trip.duration.map(_.millis), Some(63200L))
+
+    val timeout = period.timeouts.find(_.id == "27391b68-76f8-4fbd-bf37-3018a06545aa")
+      .getOrElse(fail("expected timeout"))
+    assert(period.jams.exists(jam => jam.id.nonEmpty && jam.id == timeout.precedingJamId))
+    assertEquals(timeout.wallTimeStart.map(_.millis), Some(1794613366096L))
+    assertEquals(timeout.wallTimeEnd.map(_.millis), Some(1794613448920L))
+    assertEquals(timeout.duration.map(_.millis), Some(83000L))
+    assertEquals(timeout.periodClockElapsedStart.map(_.millis), Some(1252800L))
+    assertEquals(timeout.periodClockElapsedEnd.map(_.millis), Some(1252800L))
+    assertEquals(timeout.periodClockEnd.map(_.millis), Some(547200L))
+
+    val team = game.teams.find(_.id == "1").getOrElse(fail("expected team 1"))
+    val boxTrip = team.boxTrips.find(_.id == "0e2ea502-b4e6-4bd9-a0ce-21070686c9fa")
+      .getOrElse(fail("expected box trip"))
+    val fieldingIds = game.jams.flatMap(_.teams).flatMap(_.fieldingIds.values).toSet
+    assert(boxTrip.startFieldingId.exists(fieldingIds.contains))
+    assert(boxTrip.endFieldingId.exists(fieldingIds.contains))
+    assertEquals(boxTrip.wallTimeStart.map(_.millis), Some(1794617184642L))
+    assertEquals(boxTrip.wallTimeEnd.map(_.millis), Some(1794617283976L))
+    assertEquals(boxTrip.jamClockStart.map(_.millis), Some(0L))
+    assertEquals(boxTrip.jamClockEnd.map(_.millis), Some(44200L))
+    assertEquals(boxTrip.duration.map(_.millis), Some(23600L))
+    val skater = team.skaters.find(skater => boxTrip.currentSkaterId.contains(skater.id))
+      .getOrElse(fail("expected box trip skater"))
+    val penalty = skater.penalties.find(_.boxTripId.contains(boxTrip.id)).getOrElse(fail("expected penalty"))
+    assertEquals(penalty.enteredAt.map(_.millis), Some(1794617180874L))
+
+    val clock = game.clocks.find(_.id == "Jam").getOrElse(fail("expected jam clock"))
+    assertEquals(clock.time.map(_.millis), Some(72000L))
+    assertEquals(clock.invertedTime.map(_.millis), Some(48000L))
+    assertEquals(clock.maximumTime.map(_.millis), Some(120000L))
+    assertEquals(clock.countsDown, Some(true))
+    assertEquals(clock.running, Some(false))
+  }
+
+  test("Ovejas Negras sample preserves the signed scoring-trip duration") {
+    val game = loadGame(ovejasFile)
+    val durations = for
+      jam <- game.jams if jam.period == 2 && jam.number == 19
+      team <- jam.teams if team.teamId == "2"
+      trip <- team.trips if trip.number == 2
+    yield trip.duration.map(_.millis)
+    assertEquals(durations, Vector(Some(-19000L)))
   }

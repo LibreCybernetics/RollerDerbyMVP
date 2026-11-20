@@ -22,11 +22,11 @@ class CommandLineSuite extends munit.FunSuite:
     }
     """
 
-  Seq("uJSON" -> CrgJson.decode, "jsoniter-scala" -> JsoniterCrgJson.decode).foreach { case (name, decode) =>
+  Seq("uJSON" -> CrgJson.parse, "jsoniter-scala" -> JsoniterCrgJson.parse).foreach { case (name, parse) =>
     test(s"$name CLI reports successful inputs and errors and returns a nonzero status for a mixed batch") {
       val out = ArrayBuffer.empty[String]
       val errors = ArrayBuffer.empty[String]
-      val source = new CrgJsonGameSource(path => if path == "game.json" then Right(fixture) else Right("{"), decode)
+      val source = new CrgJsonGameSource(path => if path == "game.json" then Right(fixture) else Right("{"), parse)
       val cli = new CommandLine(new ImportGamesService(source), line => { out += line; () }, line => { errors += line; () })
 
       assertEquals(cli.run(Vector("inspect", "bad.json", "game.json")), 1)

@@ -41,7 +41,7 @@ The JVM-only JMH project can be checked with `sbt 'benchmarks/Jmh/compile'`. Use
 
 ### CRG JSON reader comparison
 
-The CLI uses uJSON. `CrgFileGameSource.jsoniter()` selects the jsoniter-scala reader on JVM and Node. Both readers use the same UTF-8 file adapter and map the flat CRG keys into the same typed game model.
+The CLI uses uJSON. `CrgFileGameSource.jsoniter()` selects the jsoniter-scala reader on JVM and Node. Both readers use the same UTF-8 file adapter, raw export model, and domain mapper.
 
 ```sh
 nix develop --command sbt testFull
@@ -49,13 +49,15 @@ nix develop --command sbt 'benchmarks/Jmh/run -foe true -prof gc -rf json -rff t
 nix develop --command bash benchmarks/run-cli-comparison.sh
 ```
 
-The CLI comparison uses GNU `time` for elapsed time and peak RSS. It writes raw samples, optimized Node bundles, and bundle sizes to `target/crg-cli-benchmarks/`. Both benchmark entry points use the same `inspect` command. JMH checks complete game equality during setup, preloads the input strings, and times decoding through domain construction. The selective uJSON control discards non-game branches, then uses the same field mapper.
+The CLI comparison uses GNU `time` for elapsed time and peak RSS. It writes raw samples, optimized Node bundles, and bundle sizes to `target/crg-cli-benchmarks/`. Both benchmark entry points use the same `inspect` command. JMH checks raw export and domain equality during setup, preloads the input strings, and times parsing the complete export and mapping it to domain games.
 
 ## CRG exports and samples
 
 Place sample exports in [fixtures/samples](fixtures/samples/). If known, include the CRG release and whether each file is a single-game export or a full scoreboard export.
 
-The reader imports the flat `state` object in CRG ScoreBoard exports. It reads game records under `ScoreBoard.Game(id)` from single-game and full scoreboard exports. The reader was checked against the supplied v2027.1 game exports, and the shared test suite includes a synthetic multi-game export. Summaries show the recorded scores, roster counts, and number of jams in game periods.
+Use `CrgFileGameSource().loadRaw(path)` to inspect the complete JSON export as a `CrgExport`. Object members retain their order and duplicate keys, and numbers retain their original tokens. `CrgDomainMapper.toGames(export)` maps game records under `state.ScoreBoard.Game(id)` from single-game and full scoreboard exports. `CrgFileGameSource().load(path)` runs both stages.
+
+The domain model includes wall-clock timestamps, durations, and clock readings in milliseconds. It keeps recorded durations and clock values as supplied, including explicit zeros and signed values. The `inspect` command summarizes scores, roster counts, and the number of historical jams.
 
 ## Source layout
 
