@@ -1,6 +1,6 @@
 # Roller Derby MVP
 
-Roller Derby MVP is a Scala command-line project for analyzing tournament data exported by [CRG ScoreBoard](https://github.com/rollerderby/scoreboard). Use `inspect` to summarize one or more exports and `skater-stats` to report penalties and active jam time by team and skater. MVP categories, scoring and tie-breaks are future work.
+Roller Derby MVP is a Scala command-line project for analyzing tournament data exported by [CRG ScoreBoard](https://github.com/rollerderby/scoreboard). Use `inspect` to summarize one or more exports, `skater-stats` for skater participation and penalties, and `team-stats` for match scores and team penalty breakdowns. MVP categories, scoring and tie-breaks are future work.
 
 ## Development
 
@@ -25,6 +25,8 @@ sbt 'cliJVM/run skater-stats --by tournament fixtures/samples/'
 ```
 
 Game totals are the default. The Node CLI takes the same arguments. Jam rows identify the period and jam number and show skaters who were fielded or received a penalty. Game and tournament totals also include rostered skaters with zero activity. Warnings about invalid rosters or unresolved references go to stderr.
+
+The game view includes **Versus Team Average (VTAR)** on each skater's All roles row. Penalty VTAR, Points For VTAR, and Points Against VTAR subtract the team's full-match per-minute rate from the skater's per-minute rate. The penalty baseline uses the whole team's penalty count divided by match jam time. Scoring VTAR compares team scoring during the skater's active jams with the team's recorded full-match scoring. Positive values mean a higher event rate for the skater. The report rounds after subtraction and shows `—` when either rate is unavailable.
 
 Active jam time is the sum of the recorded durations of jams in which the skater was fielded. It includes penalty-box time during those jams. A skater appearing in multiple positions in one jam gets that jam's duration once overall. The report preserves milliseconds when present, for example `23m50.250s`.
 
@@ -54,7 +56,17 @@ sbt 'cliJVM/run penalty-stats fixtures/samples/'
 
 `penalty-stats` prints a grand total, each game's subtotal with its team and skater counts, and each team and skater's count across all supplied games. It includes rostered skaters with zero penalties and uses the same counting and deduplication rules as `skater-stats`. The unassigned count is included in the penalty total.
 
-Both statistics commands accept any mix of files and directories. A directory contributes its immediate regular files with a `.json` extension, regardless of case, in filename order. With `fixtures/samples/`, the report reads all 14 exports. A directory with no matching files produces an error. Jam and game reports still show successfully loaded inputs when another input fails. Tournament and penalty reports require every input to load successfully.
+### Team statistics
+
+```sh
+sbt 'cliJVM/run team-stats fixtures/samples/'
+```
+
+`team-stats` groups matches by team and shows each game from both teams' perspectives. The match row shows the recorded game scores, point differential, number of jams, recorded jam time, and penalties. Pack and Jammer rows break down penalties by the skater's role when the infraction occurred. Uncertain role assignments appear as ranges. Game IDs distinguish repeat matchups.
+
+Points for, points against, and penalties per minute all use the total recorded match jam time. Pack and Jammer penalty rates use that same denominator and show each role's contribution to the team rate. Role rows leave the jam time and scoring columns blank. Rates show `—` when jam time is zero or incomplete.
+
+All statistics commands accept any mix of files and directories. A directory contributes its immediate regular files with a `.json` extension, regardless of case, in filename order. With `fixtures/samples/`, the report reads all 14 exports. A directory with no matching files produces an error. The skater jam and game views still show successfully loaded inputs when another input fails. The skater tournament view, penalty report, and team report require every input to load successfully. They count identical games once and reject conflicting records for the same game.
 
 ### Compiler and lint checks
 

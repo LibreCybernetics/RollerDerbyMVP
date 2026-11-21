@@ -8,7 +8,7 @@ class JamParticipationSuite extends munit.FunSuite:
   private val gameId = GameId(ExternalId.Opaque("g"))
   private val side = GameSideId(gameId, Side.One)
   private val pivot = GameSkaterId(side, ExternalId.Opaque("pivot"))
-  private val skater = StatisticSkater(TeamId.GameLocal(side), SkaterId.GameLocal(pivot), "Home", None, None)
+  private val skater = StatisticSkater(TeamId.GameLocal(side), SkaterId.GameLocal(pivot), "Home", None, None, side)
   private val jamKey = JamKey(PeriodKey(gameId, 1), 1)
   private val passTime = Duration.ofSeconds(30).nn
   private val lineup = Vector(Fielding(FieldingId(jamKey, Side.One, FieldingPosition.Pivot),

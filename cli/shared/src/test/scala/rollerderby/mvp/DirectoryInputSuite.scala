@@ -66,6 +66,35 @@ class DirectoryInputSuite extends munit.FunSuite:
     }
   }
 
+  test("team stats cover both sides of every sample match and reconcile role penalty ranges") {
+    val command = Vector("team-stats")
+    val stats = run(command, SampleFixtures.path(""))
+    val files = SampleFixtures.filenames.sorted.map(SampleFixtures.path)
+    assertEquals(stats.status, 0)
+    assertEquals(stats, run(command, files*))
+    val rows = stats.out.filter(line => line.startsWith("vs ") || line.startsWith(" ")).map { line =>
+      line.stripLeading().nn.split(" {2,}").nn.toVector.map(_.nn)
+    }
+    val matches = rows.filter(_.lift(1).contains("All roles"))
+    assertEquals(matches.size, 28)
+    assertEquals(matches.flatMap(_.lift(9)).map(_.toInt).sum, 1000)
+    assert(matches.exists(_.take(9) == Vector(
+      "vs Mexico City Roller Derby - Mexico City All Stars", "All roles", "36", "45m46.800s",
+      "97", "91", "+6", "2.12", "1.99"
+    )))
+    def bounds(count: String): (BigDecimal, BigDecimal) = count match
+      case s"$midpoint ± $radius" => (BigDecimal(midpoint) - BigDecimal(radius), BigDecimal(midpoint) + BigDecimal(radius))
+      case exact => (BigDecimal(exact), BigDecimal(exact))
+    rows.grouped(3).foreach {
+      case Vector(matchRow, Vector("Pack", pack, _), Vector("Jammer", jammer, _)) =>
+        val total = matchRow.lift(9).map(BigDecimal(_)).getOrElse(fail("Missing team penalty count"))
+        val (packMin, packMax) = bounds(pack)
+        val (jammerMin, jammerMax) = bounds(jammer)
+        assertEquals((packMin + jammerMax, packMax + jammerMin), (total, total))
+      case group => fail(s"Expected a match and two role rows, got ${group.mkString(" / ")}")
+    }
+  }
+
   test("mixed operands keep their order and expand immediate JSON files in filename order") {
     val directory = DirectoryFixtures.path("mixed")
     val first = DirectoryFixtures.path("mixed/a.JSON")
@@ -93,7 +122,7 @@ class DirectoryInputSuite extends munit.FunSuite:
     assert(result.out.contains(s"$good: a"))
     assertEquals(result.errors.headOption, Some(s"$empty: directory contains no JSON files"))
     assert(result.errors.lift(1).exists(_.startsWith(s"$badFile: invalid JSON:")))
-    Vector(Vector("penalty-stats"), Vector("skater-stats", "--by", "tournament")).foreach { command =>
+    Vector(Vector("penalty-stats"), Vector("skater-stats", "--by", "tournament"), Vector("team-stats")).foreach { command =>
       val aggregate = run(command, empty, good, malformed)
       assertEquals(aggregate, Result(1, Vector.empty, result.errors))
     }

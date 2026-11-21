@@ -9,7 +9,8 @@ final case class StatisticSkater(
     skaterId: SkaterId,
     teamName: String,
     name: Option[String],
-    rosterNumber: Option[String]
+    rosterNumber: Option[String],
+    gameSideId: GameSideId
 )
 
 enum SkaterJamRole derives CanEqual:
@@ -102,7 +103,7 @@ object SkaterStatistics:
       }.toSet
       side.listedSkaters.map { skater =>
         val id = if sharedIds.contains(skater.skater.id) then SkaterId.GameLocal(skater.id) else skater.skater.id
-        skater.id -> StatisticSkater(side.teamId, id, side.name, skater.skater.name, skater.rosterNumber)
+        skater.id -> StatisticSkater(side.teamId, id, side.name, skater.skater.name, skater.rosterNumber, side.id)
       }
     }.toMap
     val jamKeys = game.jams.map(_.key).toSet
@@ -156,7 +157,7 @@ object SkaterStatistics:
       }
       val gameTotals = reports.map(_._1)
       val coverage = reports.iterator.map(_._3).foldLeft(StarPassCoverage(0, 0))(_ + _)
-      Right(TournamentSkaterStatistics(gameTotals, total(gameTotals.flatMap(_.rows)), reports.flatMap(_._2),
+      Right(TournamentSkaterStatistics(gameTotals, total(gameTotals.flatMap(_.rows), acrossGames = true), reports.flatMap(_._2),
         coverage, reports.flatMap(_._4)))
 
   private def isGameLocal(skater: StatisticSkater): Boolean =
@@ -164,8 +165,11 @@ object SkaterStatistics:
       case (TeamId.GameLocal(_), _) | (_, SkaterId.GameLocal(_)) => true
       case _ => false
 
-  private def total(rows: Vector[SkaterStatisticsRow]): Vector[SkaterStatisticsRow] =
-    rows.groupBy(row => row.skater.teamId -> row.skater.skaterId).valuesIterator.flatMap { entries =>
+  private def total(rows: Vector[SkaterStatisticsRow], acrossGames: Boolean = false): Vector[SkaterStatisticsRow] =
+    rows.groupBy { row =>
+      val skater = row.skater
+      (skater.teamId, skater.skaterId, Option.unless(acrossGames)(skater.gameSideId))
+    }.valuesIterator.flatMap { entries =>
       entries.reduceOption { (first, next) =>
         first.copy(
           skater = first.skater.copy(
